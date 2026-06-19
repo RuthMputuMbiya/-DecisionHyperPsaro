@@ -159,9 +159,9 @@ Route::middleware(['auth'])->group(function () {
 Route::prefix('service')->name('service.')->group(function () {
     
     // Dashboard Service
-    Route::get('/dashboard', [ServiceDashboardController::class, 'index'])->name('dashboard');
+    Route::get('/service.dashboard', [ServiceDashboardController::class, 'index'])->name('service.dashboard');
     
-    // 🔥 Performances - CORRIGÉ
+    //  Performances - CORRIGÉ
     Route::get('/performances', [PerformanceController::class, 'index'])->name('performances.index');
     
     // Ventes
