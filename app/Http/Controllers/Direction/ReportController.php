@@ -87,7 +87,7 @@ class ReportController extends Controller
             'title' => $this->getReportTitle($reportId),
             'company_name' => 'HYPER PSARO',
             'generated_at' => now(),
-            'generated_by' => auth()->user()->nom,
+            'generated_by' => auth()->user()->nom ?? 'Système',
             'devise' => $devise,
             'year' => $year,
         ];
@@ -160,7 +160,7 @@ class ReportController extends Controller
             $q->where('annee', $year);
         })->sum("montant_{$devise}");
         
-        // 🔥 TRÉSORERIE
+        // Trésorerie
         $tresorerie = FinanceFait::whereHas('indicateur', function($q) {
             $q->where('code_kpi', 'TRESO');
         })->sum("montant_{$devise}");
@@ -185,6 +185,9 @@ class ReportController extends Controller
         // Croissance
         $croissance = $lastYearCA > 0 ? round(($caTotal - $lastYearCA) / $lastYearCA * 100, 1) : 0;
         
+        // 🔥 TOP SERVICES - AJOUTÉ
+        $topServices = $this->getTopServices($devise, $year);
+        
         return [
             'ca_total' => $caTotal,
             'ca_precedent' => $lastYearCA,
@@ -195,8 +198,43 @@ class ReportController extends Controller
             'tresorerie' => $tresorerie,
             'investissements' => $investissements,
             'monthly_data' => $monthlyData,
-            'months' => ['Jan', 'Fév', 'Mar', 'Avr', 'Mai', 'Juin', 'Juil', 'Aoû', 'Sep', 'Oct', 'Nov', 'Déc']
+            'months' => ['Jan', 'Fév', 'Mar', 'Avr', 'Mai', 'Juin', 'Juil', 'Aoû', 'Sep', 'Oct', 'Nov', 'Déc'],
+            'top_services' => $topServices,  // 🔥 AJOUTÉ
         ];
+    }
+    
+    /**
+     * 🔥 RÉCUPÉRER LES TOP SERVICES
+     */
+    private function getTopServices($devise, $year)
+    {
+        $services = Service::where('est_actif', true)->get();
+        $result = [];
+        
+        foreach ($services as $service) {
+            $ca = FinanceFait::where('id_service', $service->id_service)
+                ->whereHas('indicateur', function($q) {
+                    $q->where('code_kpi', 'CA');
+                })
+                ->whereHas('temps', function($q) use ($year) {
+                    $q->where('annee', $year);
+                })
+                ->sum("montant_{$devise}");
+            
+            if ($ca > 0) {
+                $result[] = (object) [
+                    'nom_service' => $service->nom_service,
+                    'ca' => $ca
+                ];
+            }
+        }
+        
+        // Trier par CA décroissant et prendre les 5 premiers
+        usort($result, function($a, $b) {
+            return $b->ca <=> $a->ca;
+        });
+        
+        return array_slice($result, 0, 5);
     }
     
     /**

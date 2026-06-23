@@ -10,7 +10,10 @@ use App\Models\FinanceFait;
 use App\Models\Indicateur;
 use App\Models\Decision;
 use App\Models\Simulation;
-use App\Models\Temps;
+use App\Models\Vente;
+use App\Models\Achat;
+use App\Models\Depense;
+use App\Models\Investissement;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Carbon\Carbon;
@@ -25,43 +28,13 @@ class DashboardController extends Controller
         // Performances par service
         $servicePerformances = $this->getServicePerformances();
         
-        // Évolution du CA
-        $revenueEvolution = $this->getRevenueEvolution();
-        
-        // Alertes et indicateurs critiques
-        $alerts = $this->getAlerts();
-        
-        // Dernières décisions
-        $recentDecisions = Decision::with('createur')
-            ->orderBy('created_at', 'desc')
-            ->limit(5)
-            ->get();
-        
-        // Dernières simulations
-        $recentSimulations = Simulation::with('utilisateur')
-            ->orderBy('created_at', 'desc')
-            ->limit(5)
-            ->get();
-        
         // Top services par CA
         $topServices = $this->getTopServices();
-        
-        // Répartition des dépenses par service
-        $expenseBreakdown = $this->getExpenseBreakdown();
-        
-        // Tendance mensuelle
-        $monthlyTrend = $this->getMonthlyTrend();
         
         return view('direction.dashboard', compact(
             'stats',
             'servicePerformances',
-            'revenueEvolution',
-            'alerts',
-            'recentDecisions',
-            'recentSimulations',
-            'topServices',
-            'expenseBreakdown',
-            'monthlyTrend'
+            'topServices'
         ));
     }
     
@@ -69,51 +42,79 @@ class DashboardController extends Controller
     {
         $currentYear = date('Y');
         $lastYear = $currentYear - 1;
+        $devise = session('devise', 'USD');
         
-        // CA total
+        // 🔥 CA total depuis FinanceFait
         $totalCA = FinanceFait::whereHas('indicateur', function($q) {
             $q->where('code_kpi', 'CA');
         })->whereHas('temps', function($q) use ($currentYear) {
             $q->where('annee', $currentYear);
-        })->sum('montant_usd');
+        })->sum("montant_{$devise}") ?? 0;
         
-        // CA année précédente
+        // Si pas de CA, prendre depuis les ventes
+        if ($totalCA == 0) {
+            $totalCA = Vente::whereYear('created_at', $currentYear)->sum('montant') ?? 0;
+        }
+        
+        // 🔥 CA année précédente
         $lastYearCA = FinanceFait::whereHas('indicateur', function($q) {
             $q->where('code_kpi', 'CA');
         })->whereHas('temps', function($q) use ($lastYear) {
             $q->where('annee', $lastYear);
-        })->sum('montant_usd');
+        })->sum("montant_{$devise}") ?? 0;
         
-        // Marge totale
+        if ($lastYearCA == 0) {
+            $lastYearCA = Vente::whereYear('created_at', $lastYear)->sum('montant') ?? 0;
+        }
+        
+        // 🔥 Marge totale
         $totalMarge = FinanceFait::whereHas('indicateur', function($q) {
             $q->where('code_kpi', 'MARGE');
         })->whereHas('temps', function($q) use ($currentYear) {
             $q->where('annee', $currentYear);
-        })->sum('montant_usd');
+        })->sum("montant_{$devise}") ?? 0;
         
-        // Trésorerie
+        // Si pas de marge, la calculer
+        if ($totalMarge == 0) {
+            $ventes = Vente::whereYear('created_at', $currentYear)->sum('montant') ?? 0;
+            $achats = Achat::whereYear('created_at', $currentYear)->sum('montant') ?? 0;
+            $totalMarge = $ventes - $achats;
+        }
+        
+        // 🔥 Trésorerie
         $tresorerie = FinanceFait::whereHas('indicateur', function($q) {
             $q->where('code_kpi', 'TRESO');
-        })->sum('montant_usd');
+        })->sum("montant_{$devise}") ?? 0;
         
-        // Investissements
+        if ($tresorerie == 0) {
+            $ventes = Vente::sum('montant') ?? 0;
+            $achats = Achat::sum('montant') ?? 0;
+            $depenses = Depense::sum('montant') ?? 0;
+            $tresorerie = $ventes - $achats - $depenses;
+        }
+        
+        // 🔥 Investissements
         $investissements = FinanceFait::whereHas('indicateur', function($q) {
             $q->where('code_kpi', 'INVEST');
         })->whereHas('temps', function($q) use ($currentYear) {
             $q->where('annee', $currentYear);
-        })->sum('montant_usd');
+        })->sum("montant_{$devise}") ?? 0;
         
-        // Services actifs
-        $servicesActifs = Service::where('est_actif', true)->count();
+        if ($investissements == 0) {
+            $investissements = Investissement::whereYear('created_at', $currentYear)->sum('montant') ?? 0;
+        }
         
-        // Utilisateurs actifs
-        $utilisateursActifs = Utilisateur::where('est_actif', true)->count();
-        
-        // Taux de croissance CA
+        // 🔥 Taux de croissance CA
         $croissanceCA = $lastYearCA > 0 ? (($totalCA - $lastYearCA) / $lastYearCA) * 100 : 0;
         
-        // Marge brute en pourcentage
+        // 🔥 Marge brute en pourcentage
         $margePercent = $totalCA > 0 ? ($totalMarge / $totalCA) * 100 : 0;
+        
+        // 🔥 Services actifs
+        $servicesActifs = Service::where('est_actif', true)->count();
+        
+        // 🔥 Utilisateurs actifs
+        $utilisateursActifs = Utilisateur::where('est_actif', true)->count();
         
         return [
             'total_ca' => $totalCA,
@@ -131,189 +132,102 @@ class DashboardController extends Controller
     private function getServicePerformances()
     {
         $currentYear = date('Y');
+        $devise = session('devise', 'USD');
         
-        return Service::where('est_actif', true)
-            ->withCount('utilisateurs')
-            ->withSum(['financeFaits as ca' => function($q) use ($currentYear) {
-                $q->whereHas('indicateur', function($sq) {
-                    $sq->where('code_kpi', 'CA');
-                })->whereHas('temps', function($tq) use ($currentYear) {
-                    $tq->where('annee', $currentYear);
-                });
-            }], 'montant_usd')
-            ->withSum(['financeFaits as marge' => function($q) use ($currentYear) {
-                $q->whereHas('indicateur', function($sq) {
-                    $sq->where('code_kpi', 'MARGE');
-                })->whereHas('temps', function($tq) use ($currentYear) {
-                    $tq->where('annee', $currentYear);
-                });
-            }], 'montant_usd')
-            ->withSum(['financeFaits as depenses' => function($q) use ($currentYear) {
-                $q->whereHas('activite', function($sq) {
-                    $sq->whereIn('type_activite', ['depense', 'achat']);
-                })->whereHas('temps', function($tq) use ($currentYear) {
-                    $tq->where('annee', $currentYear);
-                });
-            }], 'montant_usd')
-            ->orderBy('ca', 'desc')
-            ->get()
-            ->map(function($service) {
-                return [
-                    'id' => $service->id_service,
-                    'name' => $service->nom_service,
-                    'ca' => $service->ca ?? 0,
-                    'marge' => $service->marge ?? 0,
-                    'depenses' => $service->depenses ?? 0,
-                    'employes' => $service->utilisateurs_count ?? 0,
-                    'performance' => $service->ca > 0 ? round(($service->marge / $service->ca) * 100, 1) : 0,
-                    'couleur' => $service->couleur ?? '#1a56db'
-                ];
-            });
-    }
-    
-    private function getRevenueEvolution()
-    {
-        $months = range(1, 12);
-        $data = [];
+        $services = Service::where('est_actif', true)->get();
+        $result = [];
         
-        foreach ($months as $month) {
-            $ca = FinanceFait::whereHas('indicateur', function($q) {
-                $q->where('code_kpi', 'CA');
-            })->whereHas('temps', function($q) use ($month) {
-                $q->where('mois', $month)->where('annee', date('Y'));
-            })->sum('montant_usd');
+        foreach ($services as $service) {
+            // 🔥 CA du service
+            $ca = FinanceFait::where('id_service', $service->id_service)
+                ->whereHas('indicateur', function($q) {
+                    $q->where('code_kpi', 'CA');
+                })
+                ->whereHas('temps', function($q) use ($currentYear) {
+                    $q->where('annee', $currentYear);
+                })
+                ->sum("montant_{$devise}") ?? 0;
             
-            $caPrecedent = FinanceFait::whereHas('indicateur', function($q) {
-                $q->where('code_kpi', 'CA');
-            })->whereHas('temps', function($q) use ($month) {
-                $q->where('mois', $month)->where('annee', date('Y') - 1);
-            })->sum('montant_usd');
+            if ($ca == 0) {
+                $ca = Vente::where('id_service', $service->id_service)
+                    ->whereYear('created_at', $currentYear)
+                    ->sum('montant') ?? 0;
+            }
             
-            $data[] = [
-                'month' => date('M', mktime(0, 0, 0, $month, 1)),
-                'current' => $ca,
-                'previous' => $caPrecedent,
-                'growth' => $caPrecedent > 0 ? round(($ca - $caPrecedent) / $caPrecedent * 100, 1) : 0
+            // 🔥 Marge du service
+            $marge = FinanceFait::where('id_service', $service->id_service)
+                ->whereHas('indicateur', function($q) {
+                    $q->where('code_kpi', 'MARGE');
+                })
+                ->whereHas('temps', function($q) use ($currentYear) {
+                    $q->where('annee', $currentYear);
+                })
+                ->sum("montant_{$devise}") ?? 0;
+            
+            if ($marge == 0) {
+                $ventes = Vente::where('id_service', $service->id_service)
+                    ->whereYear('created_at', $currentYear)
+                    ->sum('montant') ?? 0;
+                $achats = Achat::where('id_service', $service->id_service)
+                    ->whereYear('created_at', $currentYear)
+                    ->sum('montant') ?? 0;
+                $marge = $ventes - $achats;
+            }
+            
+            $result[] = [
+                'id' => $service->id_service,
+                'name' => $service->nom_service,
+                'ca' => $ca,
+                'marge' => $marge,
+                'performance' => $ca > 0 ? round(($marge / $ca) * 100, 1) : 0,
+                'couleur' => $service->couleur ?? '#1a56db'
             ];
         }
         
-        return $data;
-    }
-    
-    private function getAlerts()
-    {
-        // Indicateurs en alerte
-        $indicateursAlerte = Indicateur::where('est_actif', true)
-            ->where(function($q) {
-                $q->whereRaw('seuil_alerte_min > (SELECT SUM(montant_usd) FROM finance_faits WHERE id_indicateur = indicateurs.id_indicateur)')
-                  ->orWhereRaw('seuil_alerte_max < (SELECT SUM(montant_usd) FROM finance_faits WHERE id_indicateur = indicateurs.id_indicateur)');
-            })
-            ->get();
-        
-        // Services avec CA en baisse
-        $servicesBaisse = Service::whereHas('financeFaits', function($q) {
-            $q->whereHas('indicateur', function($sq) {
-                $sq->where('code_kpi', 'CA');
-            })->whereHas('temps', function($tq) {
-                $tq->where('mois', date('m'));
-            });
-        })->get()->filter(function($service) {
-            $caMois = $service->financeFaits()
-                ->whereHas('indicateur', function($q) { $q->where('code_kpi', 'CA'); })
-                ->whereHas('temps', function($q) { $q->where('mois', date('m')); })
-                ->sum('montant_usd');
-                
-            $caMoisPrecedent = $service->financeFaits()
-                ->whereHas('indicateur', function($q) { $q->where('code_kpi', 'CA'); })
-                ->whereHas('temps', function($q) { $q->where('mois', date('m', strtotime('-1 month'))); })
-                ->sum('montant_usd');
-                
-            return $caMoisPrecedent > 0 && (($caMois - $caMoisPrecedent) / $caMoisPrecedent) < -0.1;
+        // Trier par CA décroissant
+        usort($result, function($a, $b) {
+            return $b['ca'] <=> $a['ca'];
         });
         
-        return [
-            'indicateurs' => $indicateursAlerte,
-            'services_baisse' => $servicesBaisse,
-            'count' => $indicateursAlerte->count() + $servicesBaisse->count()
-        ];
+        return $result;
     }
     
     private function getTopServices()
     {
         $currentYear = date('Y');
+        $devise = session('devise', 'USD');
         
-        return Service::where('est_actif', true)
-            ->withSum(['financeFaits as total' => function($q) use ($currentYear) {
-                $q->whereHas('indicateur', function($sq) {
-                    $sq->where('code_kpi', 'CA');
-                })->whereHas('temps', function($tq) use ($currentYear) {
-                    $tq->where('annee', $currentYear);
-                });
-            }], 'montant_usd')
-            ->orderBy('total', 'desc')
-            ->limit(5)
-            ->get()
-            ->map(function($service) {
-                return [
-                    'name' => $service->nom_service,
-                    'total' => $service->total ?? 0,
-                    'couleur' => $service->couleur ?? '#1a56db'
-                ];
-            });
-    }
-    
-    private function getExpenseBreakdown()
-    {
-        $currentYear = date('Y');
+        $services = Service::where('est_actif', true)->get();
+        $result = [];
         
-        $categories = ['vente', 'achat', 'depense', 'investissement'];
-        $data = [];
-        
-        foreach ($categories as $cat) {
-            $total = FinanceFait::whereHas('activite', function($q) use ($cat) {
-                $q->where('type_activite', $cat);
-            })->whereHas('temps', function($q) use ($currentYear) {
-                $q->where('annee', $currentYear);
-            })->sum('montant_usd');
+        foreach ($services as $service) {
+            $total = FinanceFait::where('id_service', $service->id_service)
+                ->whereHas('indicateur', function($q) {
+                    $q->where('code_kpi', 'CA');
+                })
+                ->whereHas('temps', function($q) use ($currentYear) {
+                    $q->where('annee', $currentYear);
+                })
+                ->sum("montant_{$devise}") ?? 0;
             
-            if ($total > 0) {
-                $data[] = [
-                    'category' => ucfirst($cat),
-                    'total' => $total,
-                    'icon' => $this->getIconForCategory($cat)
-                ];
+            if ($total == 0) {
+                $total = Vente::where('id_service', $service->id_service)
+                    ->whereYear('created_at', $currentYear)
+                    ->sum('montant') ?? 0;
             }
-        }
-        
-        return $data;
-    }
-    
-    private function getMonthlyTrend()
-    {
-        $months = range(1, 12);
-        $trend = [];
-        
-        foreach ($months as $month) {
-            $ca = FinanceFait::whereHas('indicateur', function($q) {
-                $q->where('code_kpi', 'CA');
-            })->whereHas('temps', function($q) use ($month) {
-                $q->where('mois', $month)->where('annee', date('Y'));
-            })->sum('montant_usd');
             
-            $trend[] = $ca;
+            $result[] = [
+                'name' => $service->nom_service,
+                'total' => $total,
+                'couleur' => $service->couleur ?? '#1a56db'
+            ];
         }
         
-        return $trend;
-    }
-    
-    private function getIconForCategory($category)
-    {
-        $icons = [
-            'vente' => 'fa-shopping-cart',
-            'achat' => 'fa-truck',
-            'depense' => 'fa-receipt',
-            'investissement' => 'fa-chart-line'
-        ];
-        return $icons[$category] ?? 'fa-circle';
+        // Trier par total décroissant
+        usort($result, function($a, $b) {
+            return $b['total'] <=> $a['total'];
+        });
+        
+        return array_slice($result, 0, 5);
     }
 }

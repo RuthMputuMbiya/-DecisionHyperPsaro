@@ -5,11 +5,14 @@ namespace App\Http\Controllers\Finance;
 
 use App\Http\Controllers\Controller;
 use App\Models\Service;
-use App\Models\FinanceFait;
+use App\Models\Vente;
+use App\Models\Achat;
+use App\Models\Depense;
+use App\Models\Investissement;
 use App\Models\Indicateur;
-use App\Models\Temps;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 use Carbon\Carbon;
 
 class AnalyseController extends Controller
@@ -23,17 +26,22 @@ class AnalyseController extends Controller
         $year = $request->get('year', date('Y'));
         $serviceId = $request->get('service_id');
         
+        // Détection des colonnes de montant
+        $montantColVentes = $this->getMontantColumn('ventes');
+        $montantColAchats = $this->getMontantColumn('achats');
+        $montantColDepenses = $this->getMontantColumn('depenses');
+        
         // Données pour l'analyse
-        $monthlyData = $this->getMonthlyAnalysis($devise, $year, $serviceId);
+        $monthlyData = $this->getMonthlyAnalysis($montantColVentes, $montantColAchats, $year, $serviceId);
         
         // Comparaison avec année précédente
-        $yearComparison = $this->getYearComparison($devise, $year, $serviceId);
+        $yearComparison = $this->getYearComparison($montantColVentes, $year, $serviceId);
         
         // Ratios financiers
-        $ratios = $this->getFinancialRatios($devise, $year, $serviceId);
+        $ratios = $this->getFinancialRatios($montantColVentes, $montantColAchats, $montantColDepenses, $year, $serviceId);
         
         // Services disponibles
-        $services = Service::where('est_actif', true)->get();
+        $services = Service::all();
         $years = range(date('Y') - 2, date('Y'));
         
         return view('finance.analyses.index', compact(
@@ -54,19 +62,22 @@ class AnalyseController extends Controller
     public function tendances(Request $request)
     {
         $devise = session('devise', 'USD');
-        $period = $request->get('period', 'year'); // month, quarter, year
+        $period = $request->get('period', 'month');
+        
+        $montantColVentes = $this->getMontantColumn('ventes');
+        $montantColAchats = $this->getMontantColumn('achats');
         
         // Données de tendance
-        $trendData = $this->getTrendData($devise, $period);
+        $trendData = $this->getTrendData($montantColVentes, $period);
         
         // Indicateurs de tendance
-        $indicators = $this->getTrendIndicators($devise);
+        $indicators = $this->getTrendIndicators($montantColVentes);
         
         // Projections
-        $projections = $this->getProjections($devise);
+        $projections = $this->getProjections($montantColVentes);
         
         // Saisonnalité
-        $seasonality = $this->getSeasonality($devise);
+        $seasonality = $this->getSeasonality($montantColVentes);
         
         return view('finance.analyses.tendances', compact(
             'trendData',
@@ -86,17 +97,20 @@ class AnalyseController extends Controller
         $devise = session('devise', 'USD');
         $months = $request->get('months', 6);
         
+        $montantColVentes = $this->getMontantColumn('ventes');
+        $montantColAchats = $this->getMontantColumn('achats');
+        
         // Prévisions CA
-        $caForecast = $this->getCAForecast($devise, $months);
+        $caForecast = $this->getCAForecast($montantColVentes, $months);
         
         // Prévisions Marge
-        $margeForecast = $this->getMargeForecast($devise, $months);
+        $margeForecast = $this->getMargeForecast($montantColVentes, $montantColAchats, $months);
         
         // Scénarios
-        $scenarios = $this->getScenarios($devise);
+        $scenarios = $this->getScenarios($montantColVentes);
         
         // Analyse de sensibilité
-        $sensitivity = $this->getSensitivityAnalysis($devise);
+        $sensitivity = $this->getSensitivityAnalysis($montantColVentes);
         
         return view('finance.analyses.previsions', compact(
             'caForecast',
@@ -109,52 +123,36 @@ class AnalyseController extends Controller
     }
     
     /**
-     * Analyse mensuelle
+     * 🔥 Analyse mensuelle avec données réelles
      */
-    private function getMonthlyAnalysis($devise, $year, $serviceId = null)
+    private function getMonthlyAnalysis($montantColVentes, $montantColAchats, $year, $serviceId = null)
     {
         $data = [];
         
         for ($i = 1; $i <= 12; $i++) {
-            $query = FinanceFait::whereHas('indicateur', function($q) {
-                $q->where('code_kpi', 'CA');
-            })->whereHas('temps', function($q) use ($i, $year) {
-                $q->where('mois', $i)->where('annee', $year);
-            });
-            
+            $query = Vente::whereYear('created_at', $year)->whereMonth('created_at', $i);
             if ($serviceId) {
                 $query->where('id_service', $serviceId);
             }
+            $ca = $query->sum($montantColVentes) ?? 0;
             
-            $ca = $query->sum("montant_{$devise}");
-            
-            $queryMarge = FinanceFait::whereHas('indicateur', function($q) {
-                $q->where('code_kpi', 'MARGE');
-            })->whereHas('temps', function($q) use ($i, $year) {
-                $q->where('mois', $i)->where('annee', $year);
-            });
-            
+            $queryAchats = Achat::whereYear('created_at', $year)->whereMonth('created_at', $i);
             if ($serviceId) {
-                $queryMarge->where('id_service', $serviceId);
+                $queryAchats->where('id_service', $serviceId);
             }
+            $achats = $queryAchats->sum($montantColAchats) ?? 0;
             
-            $marge = $queryMarge->sum("montant_{$devise}");
+            $marge = $ca - $achats;
             
-            // Mois précédent pour variation
+            // Variation par rapport au mois précédent
             $prevMonth = $i == 1 ? 12 : $i - 1;
             $prevYear = $i == 1 ? $year - 1 : $year;
             
-            $prevCa = FinanceFait::whereHas('indicateur', function($q) {
-                $q->where('code_kpi', 'CA');
-            })->whereHas('temps', function($q) use ($prevMonth, $prevYear) {
-                $q->where('mois', $prevMonth)->where('annee', $prevYear);
-            });
-            
+            $prevCa = Vente::whereYear('created_at', $prevYear)->whereMonth('created_at', $prevMonth);
             if ($serviceId) {
                 $prevCa->where('id_service', $serviceId);
             }
-            
-            $prevCaValue = $prevCa->sum("montant_{$devise}");
+            $prevCaValue = $prevCa->sum($montantColVentes) ?? 0;
             
             $variation = $prevCaValue > 0 ? round(($ca - $prevCaValue) / $prevCaValue * 100, 1) : 0;
             
@@ -162,6 +160,7 @@ class AnalyseController extends Controller
                 'month' => Carbon::createFromDate($year, $i, 1)->translatedFormat('F'),
                 'month_num' => $i,
                 'ca' => $ca,
+                'achats' => $achats,
                 'marge' => $marge,
                 'taux_marge' => $ca > 0 ? round($marge / $ca * 100, 1) : 0,
                 'variation' => $variation,
@@ -173,13 +172,13 @@ class AnalyseController extends Controller
     }
     
     /**
-     * Comparaison année
+     * 🔥 Comparaison année
      */
-    private function getYearComparison($devise, $year, $serviceId = null)
+    private function getYearComparison($montantColVentes, $year, $serviceId = null)
     {
-        $currentYearTotal = $this->getYearTotal($year, $devise, $serviceId);
-        $prevYearTotal = $this->getYearTotal($year - 1, $devise, $serviceId);
-        $twoYearsAgoTotal = $this->getYearTotal($year - 2, $devise, $serviceId);
+        $currentYearTotal = $this->getYearTotal($montantColVentes, $year, $serviceId);
+        $prevYearTotal = $this->getYearTotal($montantColVentes, $year - 1, $serviceId);
+        $twoYearsAgoTotal = $this->getYearTotal($montantColVentes, $year - 2, $serviceId);
         
         $variation = $prevYearTotal > 0 ? round(($currentYearTotal - $prevYearTotal) / $prevYearTotal * 100, 1) : 0;
         $variation2 = $twoYearsAgoTotal > 0 ? round(($prevYearTotal - $twoYearsAgoTotal) / $twoYearsAgoTotal * 100, 1) : 0;
@@ -187,8 +186,8 @@ class AnalyseController extends Controller
         // Évolution mensuelle comparée
         $monthlyComparison = [];
         for ($i = 1; $i <= 12; $i++) {
-            $current = $this->getMonthTotal($year, $i, $devise, $serviceId);
-            $prev = $this->getMonthTotal($year - 1, $i, $devise, $serviceId);
+            $current = $this->getMonthTotal($montantColVentes, $year, $i, $serviceId);
+            $prev = $this->getMonthTotal($montantColVentes, $year - 1, $i, $serviceId);
             
             $monthlyComparison[] = [
                 'month' => Carbon::createFromDate($year, $i, 1)->translatedFormat('M'),
@@ -210,36 +209,27 @@ class AnalyseController extends Controller
     }
     
     /**
-     * Ratios financiers
+     * 🔥 Ratios financiers
      */
-    private function getFinancialRatios($devise, $year, $serviceId = null)
+    private function getFinancialRatios($montantColVentes, $montantColAchats, $montantColDepenses, $year, $serviceId = null)
     {
-        $ca = $this->getYearTotal($year, $devise, $serviceId);
-        $marge = $this->getYearTotal($year, $devise, $serviceId, 'MARGE');
+        $ca = $this->getYearTotal($montantColVentes, $year, $serviceId);
+        $achats = $this->getYearTotal($montantColAchats, $year, $serviceId);
+        $marge = $ca - $achats;
         
         // Dépenses
-        $depensesQuery = FinanceFait::whereHas('activite', function($q) {
-            $q->whereIn('type_activite', ['depense', 'achat']);
-        })->whereHas('temps', function($q) use ($year) {
-            $q->where('annee', $year);
-        });
-        
+        $queryDepenses = Depense::whereYear('created_at', $year);
         if ($serviceId) {
-            $depensesQuery->where('id_service', $serviceId);
+            $queryDepenses->where('id_service', $serviceId);
         }
-        $totalDepenses = $depensesQuery->sum("montant_{$devise}");
+        $totalDepenses = $queryDepenses->sum($montantColDepenses) ?? 0;
         
         // Investissements
-        $investQuery = FinanceFait::whereHas('activite', function($q) {
-            $q->where('type_activite', 'investissement');
-        })->whereHas('temps', function($q) use ($year) {
-            $q->where('annee', $year);
-        });
-        
+        $queryInvest = Investissement::whereYear('created_at', $year);
         if ($serviceId) {
-            $investQuery->where('id_service', $serviceId);
+            $queryInvest->where('id_service', $serviceId);
         }
-        $investissements = $investQuery->sum("montant_{$devise}");
+        $investissements = $queryInvest->sum('montant') ?? 0;
         
         // ROI estimé
         $roi = $investissements > 0 ? round(($marge / $investissements) * 100, 1) : 0;
@@ -250,14 +240,16 @@ class AnalyseController extends Controller
             'rentabilite' => $ca > 0 ? round(($marge - $totalDepenses) / $ca * 100, 1) : 0,
             'roi' => $roi,
             'investissements' => $investissements,
-            'depenses_total' => $totalDepenses
+            'depenses_total' => $totalDepenses,
+            'ca_total' => $ca,
+            'marge_total' => $marge
         ];
     }
     
     /**
-     * Données de tendance
+     * 🔥 Données de tendance
      */
-    private function getTrendData($devise, $period)
+    private function getTrendData($montantColVentes, $period)
     {
         $data = [];
         $endDate = Carbon::now();
@@ -280,66 +272,46 @@ class AnalyseController extends Controller
                 $format = 'Y';
         }
         
-        // Tendance CA
-        $caTrend = FinanceFait::whereHas('indicateur', function($q) {
-            $q->where('code_kpi', 'CA');
-        })->whereHas('temps', function($q) use ($startDate) {
-            $q->where('date', '>=', $startDate);
-        })
-        ->select(DB::raw("DATE_FORMAT(date, '%Y-%m') as period"), DB::raw("SUM(montant_{$devise}) as total"))
-        ->groupBy('period')
-        ->orderBy('period')
-        ->get();
-        
-        // Tendance Marge
-        $margeTrend = FinanceFait::whereHas('indicateur', function($q) {
-            $q->where('code_kpi', 'MARGE');
-        })->whereHas('temps', function($q) use ($startDate) {
-            $q->where('date', '>=', $startDate);
-        })
-        ->select(DB::raw("DATE_FORMAT(date, '%Y-%m') as period"), DB::raw("SUM(montant_{$devise}) as total"))
-        ->groupBy('period')
-        ->orderBy('period')
-        ->get();
-        
-        // Calcul de la droite de tendance (régression linéaire)
-        $trendLine = $this->calculateTrendLine($caTrend->pluck('total')->toArray());
+        // Tendance CA par mois
+        $caTrend = Vente::where('created_at', '>=', $startDate)
+            ->select(DB::raw("DATE_FORMAT(created_at, '%Y-%m') as period"), DB::raw("SUM({$montantColVentes}) as total"))
+            ->groupBy('period')
+            ->orderBy('period')
+            ->get();
         
         return [
             'ca' => $caTrend,
-            'marge' => $margeTrend,
-            'trend_line' => $trendLine,
             'period' => $period
         ];
     }
     
     /**
-     * Indicateurs de tendance
+     * 🔥 Indicateurs de tendance
      */
-    private function getTrendIndicators($devise)
+    private function getTrendIndicators($montantColVentes)
     {
-        // Moyenne mobile sur 3 mois
-        $last3Months = FinanceFait::whereHas('indicateur', function($q) {
-            $q->where('code_kpi', 'CA');
-        })->whereHas('temps', function($q) {
-            $q->where('mois', '>=', date('m') - 2)->where('annee', date('Y'));
-        })->avg("montant_{$devise}");
+        $currentYear = date('Y');
+        $currentMonth = date('m');
         
-        $previous3Months = FinanceFait::whereHas('indicateur', function($q) {
-            $q->where('code_kpi', 'CA');
-        })->whereHas('temps', function($q) {
-            $q->where('mois', '<', date('m') - 2)->where('mois', '>=', date('m') - 5)->where('annee', date('Y'));
-        })->avg("montant_{$devise}");
+        // Moyenne mobile sur 3 mois
+        $last3Months = Vente::whereYear('created_at', $currentYear)
+            ->whereMonth('created_at', '>=', $currentMonth - 2)
+            ->avg($montantColVentes) ?? 0;
+            
+        $previous3Months = Vente::whereYear('created_at', $currentYear)
+            ->whereMonth('created_at', '<', $currentMonth - 2)
+            ->whereMonth('created_at', '>=', $currentMonth - 5)
+            ->avg($montantColVentes) ?? 0;
         
         // Croissance CAGR
-        $caStart = $this->getYearTotal(date('Y') - 2, $devise);
-        $caEnd = $this->getYearTotal(date('Y'), $devise);
+        $caStart = Vente::whereYear('created_at', $currentYear - 2)->sum($montantColVentes) ?? 0;
+        $caEnd = Vente::whereYear('created_at', $currentYear)->sum($montantColVentes) ?? 0;
         $cagr = $caStart > 0 ? round((pow($caEnd / $caStart, 1/2) - 1) * 100, 1) : 0;
         
-        // Volatilité (écart-type)
+        // Volatilité
         $monthlyValues = [];
         for ($i = 1; $i <= 12; $i++) {
-            $monthlyValues[] = $this->getMonthTotal(date('Y'), $i, $devise);
+            $monthlyValues[] = Vente::whereYear('created_at', $currentYear)->whereMonth('created_at', $i)->sum($montantColVentes) ?? 0;
         }
         $volatility = $this->calculateVolatility($monthlyValues);
         
@@ -353,23 +325,21 @@ class AnalyseController extends Controller
     }
     
     /**
-     * Projections
+     * 🔥 Projections
      */
-    private function getProjections($devise)
+    private function getProjections($montantColVentes)
     {
-        // Projection linéaire pour les 12 prochains mois
         $historicalData = [];
         for ($i = 11; $i >= 0; $i--) {
             $month = date('m', strtotime("-$i months"));
             $year = date('Y', strtotime("-$i months"));
-            $value = $this->getMonthTotal($year, $month, $devise);
+            $value = Vente::whereYear('created_at', $year)->whereMonth('created_at', $month)->sum($montantColVentes) ?? 0;
             $historicalData[] = $value;
         }
         
         $projection = $this->linearProjection($historicalData, 12);
-        
-        // Intervalle de confiance
         $stdDev = $this->calculateStdDev($historicalData);
+        
         $confidenceInterval = [
             'lower' => array_map(function($v) use ($stdDev) { return max(0, $v - $stdDev); }, $projection),
             'upper' => array_map(function($v) use ($stdDev) { return $v + $stdDev; }, $projection)
@@ -384,19 +354,19 @@ class AnalyseController extends Controller
     }
     
     /**
-     * Saisonnalité
+     * 🔥 Saisonnalité
      */
-    private function getSeasonality($devise)
+    private function getSeasonality($montantColVentes)
     {
         $seasonalIndex = [];
+        $currentYear = date('Y');
         
-        // Calculer la moyenne par mois sur 3 ans
         for ($month = 1; $month <= 12; $month++) {
             $total = 0;
             $count = 0;
             
-            for ($year = date('Y') - 2; $year <= date('Y'); $year++) {
-                $value = $this->getMonthTotal($year, $month, $devise);
+            for ($year = $currentYear - 2; $year <= $currentYear; $year++) {
+                $value = Vente::whereYear('created_at', $year)->whereMonth('created_at', $month)->sum($montantColVentes) ?? 0;
                 if ($value > 0) {
                     $total += $value;
                     $count++;
@@ -407,17 +377,15 @@ class AnalyseController extends Controller
             $seasonalIndex[] = [
                 'month' => Carbon::createFromDate(null, $month, 1)->translatedFormat('F'),
                 'average' => $average,
-                'index' => 0 // Sera calculé après avoir la moyenne globale
+                'index' => 0
             ];
         }
         
-        // Calculer l'indice saisonnier
         $globalAverage = array_sum(array_column($seasonalIndex, 'average')) / 12;
         foreach ($seasonalIndex as &$item) {
             $item['index'] = $globalAverage > 0 ? round(($item['average'] / $globalAverage) * 100, 1) : 0;
         }
         
-        // Trouver les pics et creux
         $max = max(array_column($seasonalIndex, 'average'));
         $min = min(array_column($seasonalIndex, 'average'));
         
@@ -429,15 +397,14 @@ class AnalyseController extends Controller
     }
     
     /**
-     * Prévisions CA
+     * 🔥 Prévisions CA
      */
-    private function getCAForecast($devise, $months)
+    private function getCAForecast($montantColVentes, $months)
     {
-        // Méthode de lissage exponentiel
         $historical = [];
         for ($i = 0; $i < 24; $i++) {
             $date = Carbon::now()->subMonths($i);
-            $value = $this->getMonthTotal($date->year, $date->month, $devise);
+            $value = Vente::whereYear('created_at', $date->year)->whereMonth('created_at', $date->month)->sum($montantColVentes) ?? 0;
             $historical[] = $value;
         }
         
@@ -451,15 +418,17 @@ class AnalyseController extends Controller
     }
     
     /**
-     * Prévisions Marge
+     * 🔥 Prévisions Marge
      */
-    private function getMargeForecast($devise, $months)
+    private function getMargeForecast($montantColVentes, $montantColAchats, $months)
     {
         $historical = [];
         for ($i = 0; $i < 24; $i++) {
             $date = Carbon::now()->subMonths($i);
-            $value = $this->getMonthTotal($date->year, $date->month, $devise, 'MARGE');
-            $historical[] = $value;
+            $ca = Vente::whereYear('created_at', $date->year)->whereMonth('created_at', $date->month)->sum($montantColVentes) ?? 0;
+            $achats = Achat::whereYear('created_at', $date->year)->whereMonth('created_at', $date->month)->sum($montantColAchats) ?? 0;
+            $marge = $ca - $achats;
+            $historical[] = $marge;
         }
         
         $historical = array_reverse($historical);
@@ -472,11 +441,11 @@ class AnalyseController extends Controller
     }
     
     /**
-     * Scénarios
+     * 🔥 Scénarios
      */
-    private function getScenarios($devise)
+    private function getScenarios($montantColVentes)
     {
-        $currentCA = $this->getYearTotal(date('Y'), $devise);
+        $currentCA = Vente::whereYear('created_at', date('Y'))->sum($montantColVentes) ?? 0;
         
         return [
             'optimistic' => [
@@ -498,24 +467,21 @@ class AnalyseController extends Controller
     }
     
     /**
-     * Analyse de sensibilité
+     * 🔥 Analyse de sensibilité
      */
-    private function getSensitivityAnalysis($devise)
+    private function getSensitivityAnalysis($montantColVentes)
     {
-        $baseCA = $this->getYearTotal(date('Y'), $devise);
-        $baseMarge = $this->getYearTotal(date('Y'), $devise, null, 'MARGE');
+        $baseCA = Vente::whereYear('created_at', date('Y'))->sum($montantColVentes) ?? 0;
         
         $scenarios = [];
         $variations = [-20, -10, -5, 0, 5, 10, 20];
         
         foreach ($variations as $var) {
             $newCA = $baseCA * (1 + $var / 100);
-            $newMarge = $baseMarge * (1 + $var / 100);
             
             $scenarios[] = [
                 'variation' => $var,
                 'ca' => $newCA,
-                'marge' => $newMarge,
                 'impact' => $var
             ];
         }
@@ -525,34 +491,42 @@ class AnalyseController extends Controller
     
     // ========== FONCTIONS UTILITAIRES ==========
     
-    private function getYearTotal($year, $devise, $serviceId = null, $kpi = 'CA')
+    /**
+     * 🔥 Détecter la colonne de montant
+     */
+    private function getMontantColumn($table)
     {
-        $query = FinanceFait::whereHas('indicateur', function($q) use ($kpi) {
-            $q->where('code_kpi', $kpi);
-        })->whereHas('temps', function($q) use ($year) {
-            $q->where('annee', $year);
-        });
-        
-        if ($serviceId) {
-            $query->where('id_service', $serviceId);
+        try {
+            $columns = Schema::getColumnListing($table);
+            $possibleColumns = ['montant_usd', 'montant', 'montant_cdf', 'amount', 'total'];
+            
+            foreach ($possibleColumns as $col) {
+                if (in_array($col, $columns)) {
+                    return $col;
+                }
+            }
+            return 'montant';
+        } catch (\Exception $e) {
+            return 'montant';
         }
-        
-        return $query->sum("montant_{$devise}");
     }
     
-    private function getMonthTotal($year, $month, $devise, $serviceId = null, $kpi = 'CA')
+    private function getYearTotal($montantCol, $year, $serviceId = null)
     {
-        $query = FinanceFait::whereHas('indicateur', function($q) use ($kpi) {
-            $q->where('code_kpi', $kpi);
-        })->whereHas('temps', function($q) use ($year, $month) {
-            $q->where('annee', $year)->where('mois', $month);
-        });
-        
+        $query = Vente::whereYear('created_at', $year);
         if ($serviceId) {
             $query->where('id_service', $serviceId);
         }
-        
-        return $query->sum("montant_{$devise}");
+        return $query->sum($montantCol) ?? 0;
+    }
+    
+    private function getMonthTotal($montantCol, $year, $month, $serviceId = null)
+    {
+        $query = Vente::whereYear('created_at', $year)->whereMonth('created_at', $month);
+        if ($serviceId) {
+            $query->where('id_service', $serviceId);
+        }
+        return $query->sum($montantCol) ?? 0;
     }
     
     private function calculateTrendLine($data)
@@ -601,7 +575,7 @@ class AnalyseController extends Controller
         $projection = [];
         
         for ($i = 1; $i <= $steps; $i++) {
-            $projection[] = round($trend['intercept'] + $trend['slope'] * ($lastIndex + $i), 2);
+            $projection[] = round(max(0, $trend['intercept'] + $trend['slope'] * ($lastIndex + $i)), 2);
         }
         
         return $projection;
@@ -610,11 +584,11 @@ class AnalyseController extends Controller
     private function exponentialSmoothing($data, $steps, $alpha)
     {
         $smoothed = [];
-        $last = $data[count($data) - 1];
+        $last = $data[count($data) - 1] ?? 0;
         
         for ($i = 1; $i <= $steps; $i++) {
             $forecast = $alpha * $last + (1 - $alpha) * ($data[count($data) - 1] ?? $last);
-            $smoothed[] = round($forecast, 2);
+            $smoothed[] = round(max(0, $forecast), 2);
             $last = $forecast;
         }
         

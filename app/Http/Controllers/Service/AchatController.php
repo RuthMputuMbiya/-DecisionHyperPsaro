@@ -53,8 +53,21 @@ class AchatController extends Controller
         
         $achats = $query->orderBy('created_at', 'desc')->paginate(10);
         
-        // Statistiques (sans fournisseur_id)
+        // Statistiques
         $devise = session('devise', 'USD');
+        
+        // Évolution des achats (6 derniers mois)
+        $evolution = [];
+        for ($i = 5; $i >= 0; $i--) {
+            $month = date('m', strtotime("-$i months"));
+            $year = date('Y', strtotime("-$i months"));
+            $total = Achat::where('id_service', $service->id_service)
+                ->whereMonth('created_at', $month)
+                ->whereYear('created_at', $year)
+                ->sum('montant');
+            $evolution[] = $total;
+        }
+        
         $stats = [
             'total' => Achat::where('id_service', $service->id_service)->count(),
             'total_montant' => Achat::where('id_service', $service->id_service)->sum('montant'),
@@ -62,7 +75,9 @@ class AchatController extends Controller
                 ->whereMonth('created_at', date('m'))
                 ->whereYear('created_at', date('Y'))
                 ->count(),
-            'moyenne_achat' => Achat::where('id_service', $service->id_service)->avg('montant') ?? 0
+            'moyenne_achat' => Achat::where('id_service', $service->id_service)->avg('montant') ?? 0,
+            'evolution' => $evolution,
+            'croissance' => 0
         ];
         
         return view('service.achats.index', compact('achats', 'stats', 'service', 'devise'));
@@ -81,8 +96,6 @@ class AchatController extends Controller
         }
         
         $devises = Devise::all();
-        
-        // Générer une référence automatique
         $reference = $this->generateReference($service->id_service);
         
         return view('service.achats.create', compact('service', 'devises', 'reference'));
@@ -105,7 +118,6 @@ class AchatController extends Controller
             'date_achat' => 'nullable|date',
         ]);
         
-        // Créer ou récupérer l'enregistrement temps
         $dateAchat = $request->date_achat ? Carbon::parse($request->date_achat) : now();
         $temps = Temps::firstOrCreate(
             ['date' => $dateAchat->format('Y-m-d')],
@@ -119,15 +131,11 @@ class AchatController extends Controller
             ]
         );
         
-        // Récupérer la devise
         $devise = Devise::find($request->id_devise);
-        
-        // Calculer les montants convertis
         $montantCDF = $request->montant * ($devise->taux_cdf ?? 1);
         $montantUSD = $request->montant * ($devise->taux_usd ?? 1);
         $montantEUR = $request->montant * ($devise->taux_eur ?? 1);
         
-        // Créer l'achat
         $achat = Achat::create([
             'reference' => $request->reference,
             'id_service' => $service->id_service,
@@ -141,7 +149,6 @@ class AchatController extends Controller
             'updated_at' => now(),
         ]);
         
-        // Enregistrer dans la table des faits financiers
         $indicateurDepense = Indicateur::where('code_kpi', 'DEPENSE')->first();
         $activiteAchat = Activite::where('type_activite', 'achat')->first();
         
@@ -224,7 +231,6 @@ class AchatController extends Controller
             'updated_at' => now(),
         ]);
         
-        // Mettre à jour la table des faits
         $devise = Devise::find($request->id_devise);
         $montantCDF = $request->montant * ($devise->taux_cdf ?? 1);
         $montantUSD = $request->montant * ($devise->taux_usd ?? 1);
@@ -256,7 +262,6 @@ class AchatController extends Controller
         
         $achat = Achat::where('id_service', $service->id_service)->findOrFail($id);
         
-        // Supprimer l'entrée dans la table des faits
         FinanceFait::where('id_activite', function($q) {
             $q->where('type_activite', 'achat');
         })->where('id_service', $service->id_service)
@@ -292,9 +297,15 @@ class AchatController extends Controller
         
         $achats = $query->orderBy('created_at', 'desc')->get();
         
+        if ($achats->isEmpty()) {
+            return redirect()->route('service.achats.index')
+                ->with('warning', 'Aucun achat à exporter');
+        }
+        
         $filename = 'achats_' . $service->nom_service . '_' . date('Y-m-d') . '.csv';
         
         $handle = fopen('php://temp', 'w+');
+        fprintf($handle, chr(0xEF).chr(0xBB).chr(0xBF));
         fputcsv($handle, ['Référence', 'Date', 'Montant', 'Devise', 'Bon de commande', 'Description'], ';');
         
         foreach ($achats as $achat) {

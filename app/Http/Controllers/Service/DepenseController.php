@@ -60,6 +60,26 @@ class DepenseController extends Controller
         
         // Statistiques
         $devise = session('devise', 'USD');
+        
+        // Évolution des dépenses (6 derniers mois)
+        $evolution = [];
+        for ($i = 5; $i >= 0; $i--) {
+            $month = date('m', strtotime("-$i months"));
+            $year = date('Y', strtotime("-$i months"));
+            $total = Depense::where('id_service', $service->id_service)
+                ->whereMonth('created_at', $month)
+                ->whereYear('created_at', $year)
+                ->sum('montant');
+            $evolution[] = $total;
+        }
+        
+        // Données des catégories pour le graphique
+        $categoriesData = Depense::where('id_service', $service->id_service)
+            ->select('categorie_depense', DB::raw('SUM(montant) as total'))
+            ->groupBy('categorie_depense')
+            ->pluck('total', 'categorie_depense')
+            ->toArray();
+        
         $stats = [
             'total' => Depense::where('id_service', $service->id_service)->count(),
             'total_montant' => Depense::where('id_service', $service->id_service)->sum('montant'),
@@ -70,7 +90,10 @@ class DepenseController extends Controller
             'categories' => Depense::where('id_service', $service->id_service)
                 ->select('categorie_depense', DB::raw('COUNT(*) as total'), DB::raw('SUM(montant) as montant_total'))
                 ->groupBy('categorie_depense')
-                ->get()
+                ->get(),
+            'evolution' => $evolution,
+            'categories_data' => $categoriesData,
+            'croissance' => 0
         ];
         
         // Liste des catégories pour le filtre
@@ -271,17 +294,21 @@ class DepenseController extends Controller
         $montantUSD = $request->montant * ($devise->taux_usd ?? 1);
         $montantEUR = $request->montant * ($devise->taux_eur ?? 1);
         
-        FinanceFait::where('id_activite', function($q) {
-            $q->where('type_activite', 'depense');
-        })->where('id_service', $service->id_service)
-          ->where('description', $depense->description)
-          ->update([
-              'montant_original' => $request->montant,
-              'montant_cdf' => $montantCDF,
-              'montant_usd' => $montantUSD,
-              'montant_eur' => $montantEUR,
-              'id_devise_originale' => $request->id_devise,
-          ]);
+        $activiteDepense = Activite::where('type_activite', 'depense')->first();
+        
+        if ($activiteDepense) {
+            FinanceFait::where('id_activite', $activiteDepense->id_activite)
+                ->where('id_service', $service->id_service)
+                ->where('description', $depense->description)
+                ->update([
+                    'montant_original' => $request->montant,
+                    'montant_cdf' => $montantCDF,
+                    'montant_usd' => $montantUSD,
+                    'montant_eur' => $montantEUR,
+                    'id_devise_originale' => $request->id_devise,
+                    'updated_at' => now(),
+                ]);
+        }
         
         return redirect()->route('service.depenses.index')
             ->with('success', 'Dépense modifiée avec succès');
@@ -297,12 +324,14 @@ class DepenseController extends Controller
         
         $depense = Depense::where('id_service', $service->id_service)->findOrFail($id);
         
-        // Supprimer l'entrée dans la table des faits
-        FinanceFait::where('id_activite', function($q) {
-            $q->where('type_activite', 'depense');
-        })->where('id_service', $service->id_service)
-          ->where('description', $depense->description)
-          ->delete();
+        $activiteDepense = Activite::where('type_activite', 'depense')->first();
+        
+        if ($activiteDepense) {
+            FinanceFait::where('id_activite', $activiteDepense->id_activite)
+                ->where('id_service', $service->id_service)
+                ->where('description', $depense->description)
+                ->delete();
+        }
         
         $depense->delete();
         
@@ -315,12 +344,16 @@ class DepenseController extends Controller
     }
     
     /**
-     * Exporter les dépenses
+     * 🔥 EXPORTER LES DÉPENSES (AMÉLIORÉ)
      */
     public function export(Request $request)
     {
         $user = auth()->user();
         $service = $user->service;
+        
+        if (!$service) {
+            return redirect()->route('dashboard')->with('error', 'Aucun service associé');
+        }
         
         $query = Depense::where('id_service', $service->id_service);
         
@@ -336,16 +369,24 @@ class DepenseController extends Controller
         
         $depenses = $query->orderBy('created_at', 'desc')->get();
         
+        // Si aucune dépense, retourner avec un message
+        if ($depenses->isEmpty()) {
+            return redirect()->route('service.depenses.index')
+                ->with('warning', 'Aucune dépense à exporter pour la période sélectionnée');
+        }
+        
         $filename = 'depenses_' . $service->nom_service . '_' . date('Y-m-d') . '.csv';
         
         $handle = fopen('php://temp', 'w+');
+        // Ajouter BOM pour UTF-8
+        fprintf($handle, chr(0xEF) . chr(0xBB) . chr(0xBF));
         fputcsv($handle, ['Référence', 'Date', 'Montant', 'Devise', 'Catégorie', 'Justificatif', 'Description'], ';');
         
         foreach ($depenses as $depense) {
             fputcsv($handle, [
                 $depense->reference,
                 $depense->created_at->format('d/m/Y'),
-                $depense->montant,
+                number_format($depense->montant, 2, ',', ' '),
                 $depense->devise->code ?? 'USD',
                 $depense->categorie_depense,
                 $depense->justificatif ?? '-',

@@ -60,12 +60,35 @@ class InvestissementController extends Controller
         
         // Statistiques
         $devise = session('devise', 'USD');
+        
+        // 🔥 Évolution des investissements (6 derniers mois)
+        $evolution = [];
+        for ($i = 5; $i >= 0; $i--) {
+            $month = date('m', strtotime("-$i months"));
+            $year = date('Y', strtotime("-$i months"));
+            $total = Investissement::where('id_service', $service->id_service)
+                ->whereMonth('created_at', $month)
+                ->whereYear('created_at', $year)
+                ->sum('montant');
+            $evolution[] = $total;
+        }
+        
+        // 🔥 Données des statuts pour le graphique
+        $statutsData = Investissement::where('id_service', $service->id_service)
+            ->select('statut', DB::raw('COUNT(*) as total'), DB::raw('SUM(montant) as montant_total'))
+            ->groupBy('statut')
+            ->pluck('montant_total', 'statut')
+            ->toArray();
+        
         $stats = [
             'total' => Investissement::where('id_service', $service->id_service)->count(),
             'total_montant' => Investissement::where('id_service', $service->id_service)->sum('montant'),
             'en_cours' => Investissement::where('id_service', $service->id_service)->where('statut', 'En cours')->count(),
             'termines' => Investissement::where('id_service', $service->id_service)->where('statut', 'Terminé')->count(),
             'roi_moyen' => Investissement::where('id_service', $service->id_service)->avg('roi_estime') ?? 0,
+            'evolution' => $evolution,
+            'statuts_data' => $statutsData,
+            'statuts' => $statutsData,
         ];
         
         // Liste des statuts pour le filtre
@@ -87,8 +110,6 @@ class InvestissementController extends Controller
         }
         
         $devises = Devise::all();
-        
-        // Générer une référence automatique
         $reference = $this->generateReference($service->id_service);
         
         return view('service.investissements.create', compact('service', 'devises', 'reference'));
@@ -114,7 +135,6 @@ class InvestissementController extends Controller
             'date_investissement' => 'nullable|date',
         ]);
         
-        // Créer ou récupérer l'enregistrement temps
         $dateInvest = $request->date_investissement ? Carbon::parse($request->date_investissement) : now();
         $temps = Temps::firstOrCreate(
             ['date' => $dateInvest->format('Y-m-d')],
@@ -128,15 +148,11 @@ class InvestissementController extends Controller
             ]
         );
         
-        // Récupérer la devise
         $devise = Devise::find($request->id_devise);
-        
-        // Calculer les montants convertis
         $montantCDF = $request->montant * ($devise->taux_cdf ?? 1);
         $montantUSD = $request->montant * ($devise->taux_usd ?? 1);
         $montantEUR = $request->montant * ($devise->taux_eur ?? 1);
         
-        // Créer l'investissement
         $investissement = Investissement::create([
             'reference' => $request->reference,
             'nom_projet' => $request->nom_projet,
@@ -153,7 +169,6 @@ class InvestissementController extends Controller
             'updated_at' => now(),
         ]);
         
-        // Enregistrer dans la table des faits financiers
         $indicateurInvest = Indicateur::where('code_kpi', 'INVEST')->first();
         $activiteInvest = Activite::where('type_activite', 'investissement')->first();
         
@@ -191,8 +206,6 @@ class InvestissementController extends Controller
             ->findOrFail($id);
         
         $devise = session('devise', 'USD');
-        
-        // Calcul des métriques supplémentaires
         $metrics = $this->calculateMetrics($investissement);
         
         return view('service.investissements.show', compact('investissement', 'service', 'devise', 'metrics'));
@@ -246,7 +259,6 @@ class InvestissementController extends Controller
             'updated_at' => now(),
         ]);
         
-        // Mettre à jour la table des faits
         $devise = Devise::find($request->id_devise);
         $montantCDF = $request->montant * ($devise->taux_cdf ?? 1);
         $montantUSD = $request->montant * ($devise->taux_usd ?? 1);
@@ -278,7 +290,6 @@ class InvestissementController extends Controller
         
         $investissement = Investissement::where('id_service', $service->id_service)->findOrFail($id);
         
-        // Supprimer l'entrée dans la table des faits
         FinanceFait::where('id_activite', function($q) {
             $q->where('type_activite', 'investissement');
         })->where('id_service', $service->id_service)
@@ -317,9 +328,15 @@ class InvestissementController extends Controller
         
         $investissements = $query->orderBy('created_at', 'desc')->get();
         
+        if ($investissements->isEmpty()) {
+            return redirect()->route('service.investissements.index')
+                ->with('warning', 'Aucun investissement à exporter');
+        }
+        
         $filename = 'investissements_' . $service->nom_service . '_' . date('Y-m-d') . '.csv';
         
         $handle = fopen('php://temp', 'w+');
+        fprintf($handle, chr(0xEF).chr(0xBB).chr(0xBF));
         fputcsv($handle, ['Référence', 'Projet', 'Date', 'Montant', 'Devise', 'Durée', 'ROI', 'Statut', 'Description'], ';');
         
         foreach ($investissements as $invest) {
@@ -372,13 +389,9 @@ class InvestissementController extends Controller
     {
         $metrics = [];
         
-        // Gain mensuel estimé (simulation)
         $gainMensuelEstime = $investissement->montant * (($investissement->roi_estime ?? 0) / 100) / $investissement->duree_mois;
-        
-        // ROI annualisé
         $roiAnnualise = $investissement->roi_estime ? ($investissement->roi_estime / $investissement->duree_mois) * 12 : 0;
         
-        // Seuils de performance
         $performance = 'normal';
         if ($investissement->roi_estime >= 20) {
             $performance = 'excellent';

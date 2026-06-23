@@ -72,6 +72,20 @@
                                           rows="3">{{ old('description', $indicateur->description) }}</textarea>
                             </div>
                             
+                            {{-- 🔥 FORMULE DE CALCUL (VISIBLE) --}}
+                            <div class="col-12">
+                                <label class="form-label fw-semibold">Formule de calcul <span class="text-danger">*</span></label>
+                                <div class="input-group">
+                                    <span class="input-group-text bg-transparent"><i class="fas fa-calculator"></i></span>
+                                    <input type="text" name="formule" class="form-control @error('formule') is-invalid @enderror" 
+                                           value="{{ old('formule', $indicateur->formule) }}" placeholder="Ex: SUM(ventes.montant_usd)">
+                                </div>
+                                <small class="text-muted"><i class="fas fa-info-circle me-1"></i>Formule SQL pour le calcul automatique de l'indicateur</small>
+                                @error('formule')
+                                    <div class="invalid-feedback d-block">{{ $message }}</div>
+                                @enderror
+                            </div>
+                            
                             <div class="col-md-4">
                                 <label class="form-label fw-semibold">Seuil minimum</label>
                                 <input type="number" name="seuil_alerte_min" class="form-control @error('seuil_alerte_min') is-invalid @enderror" 

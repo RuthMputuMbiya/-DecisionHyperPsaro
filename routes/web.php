@@ -61,7 +61,6 @@ Route::middleware(['auth'])->group(function () {
 
 // ==============================================
 // ROUTES PROTÉGÉES (AUTHENTIFICATION REQUISE)
-// 🔥 SUPPRESSION DE TOUS LES MIDDLEWARES role POUR ÉVITER L'ERREUR
 // ==============================================
 Route::middleware(['auth'])->group(function () {
     
@@ -95,18 +94,28 @@ Route::middleware(['auth'])->group(function () {
         Route::post('/indicateurs/{id}/toggle-status', [IndicateurController::class, 'toggleStatus'])->name('indicateurs.toggle-status');
         Route::get('/indicateurs/{id}/check-alert', [IndicateurController::class, 'checkAlert'])->name('indicateurs.check-alert');
         Route::get('/indicateurs/{id}/delete', [IndicateurController::class, 'destroy'])->name('indicateurs.delete');
+        Route::get('/indicateurs/predefined/{code}', [IndicateurController::class, 'getPredefined'])->name('indicateurs.predefined');
+
+        // ============================================
+        // 🔥 ROUTES DES DÉCISIONS - CORRIGÉES
+        // ============================================
         
-        // Décisions stratégiques
+        // 🔥 ROUTES GET (POUR AFFICHER LES PAGES)
         Route::get('/decisions', [DecisionController::class, 'index'])->name('decisions.index');
-        Route::get('/decisions/{id}', [DecisionController::class, 'show'])->name('decisions.show');
-        Route::post('/decisions/{id}/validate', [DecisionController::class, 'validate'])->name('decisions.validate');
-        Route::post('/decisions/{id}/reject', [DecisionController::class, 'reject'])->name('decisions.reject');
+        Route::get('/decisions/generate', [DecisionController::class, 'generate'])->name('decisions.generate');
         Route::get('/decisions/export', [DecisionController::class, 'export'])->name('decisions.export');
         
+        // 🔥 ROUTE SHOW (DOIT ÊTRE EN DERNIER)
+        Route::get('/decisions/{id}', [DecisionController::class, 'show'])->name('decisions.show');
+        
+        // 🔥 ROUTES POST (POUR VALIDER ET REJETER)
+        Route::post('/decisions/{id}/validate', [DecisionController::class, 'validateDecision'])->name('decisions.validate');
+        Route::post('/decisions/{id}/reject', [DecisionController::class, 'rejectDecision'])->name('decisions.reject');
+        
         // Rapports
-          Route::get('/reports', [ReportController::class, 'index'])->name('reports.index');
-    Route::get('/reports/{reportId}/generate', [ReportController::class, 'generate'])->name('reports.generate');
-});
+        Route::get('/reports', [ReportController::class, 'index'])->name('reports.index');
+        Route::get('/reports/{reportId}/generate', [ReportController::class, 'generate'])->name('reports.generate');
+    });
     
     // ==============================================
     // 2. ROUTES CONSEILLER FINANCIER
@@ -153,16 +162,63 @@ Route::middleware(['auth'])->group(function () {
         });
     });
     
-   // ==============================================
-// 3. ROUTES CHEF DE SERVICE
-// ==============================================
-Route::prefix('service')->name('service.')->group(function () {
-    
-    // Dashboard Service
-    Route::get('/service.dashboard', [ServiceDashboardController::class, 'index'])->name('service.dashboard');
-    
-    //  Performances - CORRIGÉ
+    // ==============================================
+    // 3. ROUTES CHEF DE SERVICE
+    // ==============================================
+    Route::prefix('service')->name('service.')->group(function () {
+        
+        // 🔥 DASHBOARD - CORRIGÉ
+        Route::get('/dashboard', [ServiceDashboardController::class, 'index'])->name('dashboard');
+        Route::get('/service.dashboard', [ServiceDashboardController::class, 'index'])->name('service.dashboard');
+        
+        Route::get('/performances', [PerformanceController::class, 'index'])->name('performances.index');
+        
+        Route::prefix('ventes')->name('ventes.')->group(function () {
+            Route::get('/', [VenteController::class, 'index'])->name('index');
+            Route::get('/create', [VenteController::class, 'create'])->name('create');
+            Route::post('/store', [VenteController::class, 'store'])->name('store');
+            Route::get('/{id}', [VenteController::class, 'show'])->name('show');
+            Route::get('/{id}/edit', [VenteController::class, 'edit'])->name('edit');
+            Route::put('/{id}', [VenteController::class, 'update'])->name('update');
+            Route::get('/export', [VenteController::class, 'export'])->name('export');
+            Route::get('/{id}/delete', [VenteController::class, 'destroy'])->name('delete');
+        });
+        
+        Route::prefix('achats')->name('achats.')->group(function () {
+            Route::get('/', [AchatController::class, 'index'])->name('index');
+            Route::get('/create', [AchatController::class, 'create'])->name('create');
+            Route::post('/store', [AchatController::class, 'store'])->name('store');
+            Route::get('/{id}', [AchatController::class, 'show'])->name('show');
+            Route::get('/{id}/edit', [AchatController::class, 'edit'])->name('edit');
+            Route::put('/{id}', [AchatController::class, 'update'])->name('update');
+            Route::get('/export', [AchatController::class, 'export'])->name('export');
+            Route::get('/{id}/delete', [AchatController::class, 'destroy'])->name('delete');
+        });
+        
+        //  DÉPENSES - AJOUTER LA ROUTE EXPORT
+    Route::prefix('depenses')->name('depenses.')->group(function () {
+        Route::get('/', [DepenseController::class, 'index'])->name('index');
+        Route::get('/create', [DepenseController::class, 'create'])->name('create');
+        Route::post('/store', [DepenseController::class, 'store'])->name('store');
+        Route::get('/{id}', [DepenseController::class, 'show'])->name('show');
+        Route::get('/{id}/edit', [DepenseController::class, 'edit'])->name('edit');
+        Route::put('/{id}', [DepenseController::class, 'update'])->name('update');
+        Route::get('/export', [DepenseController::class, 'export'])->name('export');  // 🔥 AJOUTER CETTE LIGNE
+        Route::get('/{id}/delete', [DepenseController::class, 'destroy'])->name('delete');
+    });
+        
+        Route::prefix('investissements')->name('investissements.')->group(function () {
+            Route::get('/', [InvestissementController::class, 'index'])->name('index');
+            Route::get('/create', [InvestissementController::class, 'create'])->name('create');
+            Route::post('/store', [InvestissementController::class, 'store'])->name('store');
+            Route::get('/{id}', [InvestissementController::class, 'show'])->name('show');
+            Route::get('/{id}/edit', [InvestissementController::class, 'edit'])->name('edit');
+            Route::put('/{id}', [InvestissementController::class, 'update'])->name('update');
+            Route::get('/export', [InvestissementController::class, 'export'])->name('export');
+            Route::get('/{id}/delete', [InvestissementController::class, 'destroy'])->name('delete');
+             // 🔥 PERFORMANCES
     Route::get('/performances', [PerformanceController::class, 'index'])->name('performances.index');
+    Route::get('/performances/export', [PerformanceController::class, 'export'])->name('performances.export');  // 🔥 AJOUTÉ
     
     // Ventes
     Route::prefix('ventes')->name('ventes.')->group(function () {
@@ -175,41 +231,11 @@ Route::prefix('service')->name('service.')->group(function () {
         Route::get('/export', [VenteController::class, 'export'])->name('export');
         Route::get('/{id}/delete', [VenteController::class, 'destroy'])->name('delete');
     });
-    
-    // Achats
-    Route::prefix('achats')->name('achats.')->group(function () {
-        Route::get('/', [AchatController::class, 'index'])->name('index');
-        Route::get('/create', [AchatController::class, 'create'])->name('create');
-        Route::post('/store', [AchatController::class, 'store'])->name('store');
-        Route::get('/{id}', [AchatController::class, 'show'])->name('show');
-        Route::get('/{id}/edit', [AchatController::class, 'edit'])->name('edit');
-        Route::put('/{id}', [AchatController::class, 'update'])->name('update');
-        Route::get('/export', [AchatController::class, 'export'])->name('export');
-        Route::get('/{id}/delete', [AchatController::class, 'destroy'])->name('delete');
-    });
-    
-    // Dépenses
-    Route::prefix('depenses')->name('depenses.')->group(function () {
-        Route::get('/', [DepenseController::class, 'index'])->name('index');
-        Route::get('/create', [DepenseController::class, 'create'])->name('create');
-        Route::post('/store', [DepenseController::class, 'store'])->name('store');
-        Route::get('/{id}', [DepenseController::class, 'show'])->name('show');
-        Route::get('/{id}/edit', [DepenseController::class, 'edit'])->name('edit');
-        Route::put('/{id}', [DepenseController::class, 'update'])->name('update');
-        Route::get('/export', [DepenseController::class, 'export'])->name('export');
-        Route::get('/{id}/delete', [DepenseController::class, 'destroy'])->name('delete');
-    });
-    
-    // Investissements
-    Route::prefix('investissements')->name('investissements.')->group(function () {
-        Route::get('/', [InvestissementController::class, 'index'])->name('index');
-        Route::get('/create', [InvestissementController::class, 'create'])->name('create');
-        Route::post('/store', [InvestissementController::class, 'store'])->name('store');
-        Route::get('/{id}', [InvestissementController::class, 'show'])->name('show');
-        Route::get('/{id}/edit', [InvestissementController::class, 'edit'])->name('edit');
-        Route::put('/{id}', [InvestissementController::class, 'update'])->name('update');
-        Route::get('/export', [InvestissementController::class, 'export'])->name('export');
-        Route::get('/{id}/delete', [InvestissementController::class, 'destroy'])->name('delete');
+       
+       
+       
+       
+            });
     });
 });
 
@@ -218,5 +244,4 @@ Route::prefix('service')->name('service.')->group(function () {
 // ==============================================
 Route::get('/test', function () {
     return view('test');
-});
 });

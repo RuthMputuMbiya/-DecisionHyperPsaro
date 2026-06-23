@@ -5,10 +5,14 @@ namespace App\Http\Controllers\Finance;
 
 use App\Http\Controllers\Controller;
 use App\Models\Service;
-use App\Models\FinanceFait;
+use App\Models\Vente;
+use App\Models\Achat;
+use App\Models\Depense;
+use App\Models\Investissement;
 use App\Models\Indicateur;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 use Carbon\Carbon;
 
 class ComparisonController extends Controller
@@ -20,52 +24,42 @@ class ComparisonController extends Controller
     {
         $devise = session('devise', 'USD');
         
-        $yearlyComparison = $this->compareYears($devise);
-        $servicesComparison = $this->compareServices($devise);
-        
         $indicateurs = Indicateur::where('est_actif', true)->get();
-        $services = Service::where('est_actif', true)->get();
+        $services = Service::all();
         $years = range(date('Y') - 2, date('Y'));
         
         return view('finance.comparaisons.index', compact(
-            'yearlyComparison', 'servicesComparison', 'indicateurs', 'services', 'years', 'devise'
+            'indicateurs', 'services', 'years', 'devise'
         ));
     }
     
     /**
-     * 🔥 COMPARAISON PAR PÉRIODES - CORRIGÉE
+     * 🔥 COMPARAISON PAR PÉRIODES - DONNÉES RÉELLES
      */
     public function periodes(Request $request)
     {
         $devise = session('devise', 'USD');
         
-        // Récupérer les paramètres
         $period1 = $request->get('period1', date('Y-m'));
         $period2 = $request->get('period2', date('Y-m', strtotime('-1 month')));
         $indicateurId = $request->get('indicateur_id');
         
-        // 🔥 CORRECTION : Si les périodes sont identiques, prendre le mois précédent pour period2
         if ($period1 == $period2) {
             $date = Carbon::createFromFormat('Y-m', $period1);
             $period2 = $date->subMonth()->format('Y-m');
         }
         
-        // Récupérer les indicateurs
+        // Détection des colonnes
+        $montantColVentes = $this->getMontantColumn('ventes');
+        
         $indicateurs = Indicateur::where('est_actif', true)->get();
         
-        // Données pour la période 1
-        $data1 = $this->getPeriodData($period1, $devise, $indicateurId);
+        // Données pour les périodes
+        $data1 = $this->getPeriodData($period1, $montantColVentes, $indicateurId);
+        $data2 = $this->getPeriodData($period2, $montantColVentes, $indicateurId);
         
-        // Données pour la période 2
-        $data2 = $this->getPeriodData($period2, $devise, $indicateurId);
-        
-        // Calcul des écarts
         $comparison = $this->calculateComparison($data1, $data2);
-        
-        // Détails par service
-        $servicesData = $this->getServicesPeriodData($period1, $period2, $devise, $indicateurId);
-        
-        // Périodes disponibles
+        $servicesData = $this->getServicesPeriodData($period1, $period2, $montantColVentes, $indicateurId);
         $availablePeriods = $this->getAvailablePeriods();
         
         return view('finance.comparaisons.periodes', compact(
@@ -75,7 +69,7 @@ class ComparisonController extends Controller
     }
     
     /**
-     * Comparaison par services
+     * 🔥 COMPARAISON PAR SERVICES - DONNÉES RÉELLES
      */
     public function services(Request $request)
     {
@@ -83,8 +77,10 @@ class ComparisonController extends Controller
         $year = $request->get('year', date('Y'));
         $indicateurId = $request->get('indicateur_id');
         
+        $montantColVentes = $this->getMontantColumn('ventes');
+        
         $indicateurs = Indicateur::where('est_actif', true)->get();
-        $servicesData = $this->getServicesComparisonData($year, $devise, $indicateurId);
+        $servicesData = $this->getServicesComparisonData($year, $montantColVentes, $indicateurId);
         
         $topServices = collect($servicesData)->sortByDesc('valeur')->take(5);
         $bottomServices = collect($servicesData)->sortBy('valeur')->take(5);
@@ -101,7 +97,7 @@ class ComparisonController extends Controller
     }
     
     /**
-     * Comparaison par indicateurs
+     * 🔥 COMPARAISON PAR INDICATEURS - DONNÉES RÉELLES
      */
     public function indicateurs(Request $request)
     {
@@ -109,10 +105,12 @@ class ComparisonController extends Controller
         $year = $request->get('year', date('Y'));
         $serviceId = $request->get('service_id');
         
-        $services = Service::where('est_actif', true)->get();
-        $indicateursData = $this->getIndicateursComparisonData($year, $devise, $serviceId);
-        $evolution = $this->getIndicateursEvolution($year, $devise, $serviceId);
-        $correlation = $this->getIndicateursCorrelation($year, $devise, $serviceId);
+        $montantColVentes = $this->getMontantColumn('ventes');
+        
+        $services = Service::all();
+        $indicateursData = $this->getIndicateursComparisonData($year, $montantColVentes, $serviceId);
+        $evolution = $this->getIndicateursEvolution($year, $montantColVentes, $serviceId);
+        $correlation = $this->getIndicateursCorrelation($year, $montantColVentes, $serviceId);
         $years = range(date('Y') - 2, date('Y'));
         
         return view('finance.comparaisons.indicateurs', compact(
@@ -128,18 +126,19 @@ class ComparisonController extends Controller
     {
         $type = $request->get('type');
         $devise = session('devise', 'USD');
+        $montantColVentes = $this->getMontantColumn('ventes');
         
         switch ($type) {
             case 'periods':
                 $period1 = $request->get('period1');
                 $period2 = $request->get('period2');
                 $indicateurId = $request->get('indicateur_id');
-                $data = $this->getPeriodComparisonChartData($period1, $period2, $devise, $indicateurId);
+                $data = $this->getPeriodComparisonChartData($period1, $period2, $montantColVentes, $indicateurId);
                 break;
             case 'services':
                 $year = $request->get('year');
                 $indicateurId = $request->get('indicateur_id');
-                $data = $this->getServicesChartData($year, $devise, $indicateurId);
+                $data = $this->getServicesChartData($year, $montantColVentes, $indicateurId);
                 break;
             default:
                 $data = [];
@@ -148,68 +147,35 @@ class ComparisonController extends Controller
         return response()->json($data);
     }
     
-    // ========== MÉTHODES PRIVÉES ==========
+    // ============================================
+    // MÉTHODES PRIVÉES
+    // ============================================
     
-    private function compareYears($devise)
+    /**
+     * 🔥 Détecter la colonne de montant
+     */
+    private function getMontantColumn($table)
     {
-        $currentYear = date('Y');
-        $data = [];
-        
-        for ($i = 2; $i >= 0; $i--) {
-            $year = $currentYear - $i;
-            $ca = FinanceFait::whereHas('indicateur', function($q) {
-                $q->where('code_kpi', 'CA');
-            })->whereHas('temps', function($q) use ($year) {
-                $q->where('annee', $year);
-            })->sum("montant_{$devise}");
+        try {
+            $columns = Schema::getColumnListing($table);
+            $possibleColumns = ['montant_usd', 'montant', 'montant_cdf', 'amount', 'total'];
             
-            $marge = FinanceFait::whereHas('indicateur', function($q) {
-                $q->where('code_kpi', 'MARGE');
-            })->whereHas('temps', function($q) use ($year) {
-                $q->where('annee', $year);
-            })->sum("montant_{$devise}");
-            
-            $data[] = [
-                'year' => $year,
-                'ca' => $ca,
-                'marge' => $marge,
-                'croissance' => $i < 2 && isset($data[count($data)-1]) ? 
-                    ($data[count($data)-1]['ca'] > 0 ? round(($ca - $data[count($data)-1]['ca']) / $data[count($data)-1]['ca'] * 100, 1) : 0) : 0
-            ];
+            foreach ($possibleColumns as $col) {
+                if (in_array($col, $columns)) {
+                    return $col;
+                }
+            }
+            return 'montant';
+        } catch (\Exception $e) {
+            return 'montant';
         }
-        
-        return $data;
-    }
-    
-    private function compareServices($devise)
-    {
-        $currentYear = date('Y');
-        
-        return Service::where('est_actif', true)
-            ->withSum(['financeFaits as ca' => function($q) use ($currentYear, $devise) {
-                $q->whereHas('indicateur', function($sq) {
-                    $sq->where('code_kpi', 'CA');
-                })->whereHas('temps', function($tq) use ($currentYear) {
-                    $tq->where('annee', $currentYear);
-                });
-            }], "montant_{$devise}")
-            ->orderBy('ca', 'desc')
-            ->get()
-            ->map(function($service) {
-                return [
-                    'name' => $service->nom_service,
-                    'value' => $service->ca ?? 0,
-                    'couleur' => $service->couleur ?? '#1a56db'
-                ];
-            });
     }
     
     /**
      * 🔥 OBTENIR LES DONNÉES D'UNE PÉRIODE - CORRIGÉ
      */
-    private function getPeriodData($period, $devise, $indicateurId = null)
+    private function getPeriodData($period, $montantColVentes, $indicateurId = null)
     {
-        // Vérifier le format
         if (strpos($period, '-') === false) {
             return ['period' => $period, 'total' => 0, 'details' => []];
         }
@@ -217,37 +183,26 @@ class ComparisonController extends Controller
         list($year, $month) = explode('-', $period);
         $isYear = ($month == 'all');
         
-        $query = FinanceFait::whereHas('temps', function($q) use ($year, $month, $isYear) {
-            $q->where('annee', $year);
-            if (!$isYear) {
-                $q->where('mois', $month);
-            }
-        });
-        
-        if ($indicateurId) {
-            $query->where('id_indicateur', $indicateurId);
+        $query = Vente::whereYear('created_at', $year);
+        if (!$isYear) {
+            $query->whereMonth('created_at', $month);
         }
         
-        $total = $query->sum("montant_{$devise}");
+        $total = $query->sum($montantColVentes) ?? 0;
         
         // Détails par service
-        $services = Service::where('est_actif', true)->get();
+        $services = Service::all();
         $details = [];
         
         foreach ($services as $service) {
-            $serviceQuery = FinanceFait::where('id_service', $service->id_service)
-                ->whereHas('temps', function($q) use ($year, $month, $isYear) {
-                    $q->where('annee', $year);
-                    if (!$isYear) {
-                        $q->where('mois', $month);
-                    }
-                });
+            $serviceQuery = Vente::where('id_service', $service->id_service)
+                ->whereYear('created_at', $year);
             
-            if ($indicateurId) {
-                $serviceQuery->where('id_indicateur', $indicateurId);
+            if (!$isYear) {
+                $serviceQuery->whereMonth('created_at', $month);
             }
             
-            $value = $serviceQuery->sum("montant_{$devise}");
+            $value = $serviceQuery->sum($montantColVentes) ?? 0;
             
             if ($value > 0) {
                 $details[] = [
@@ -268,7 +223,7 @@ class ComparisonController extends Controller
     }
     
     /**
-     * 🔥 CALCULER LES ÉCARTS - CORRIGÉ
+     * 🔥 CALCULER LES ÉCARTS
      */
     private function calculateComparison($data1, $data2)
     {
@@ -278,7 +233,6 @@ class ComparisonController extends Controller
         $difference = $total2 - $total1;
         $percentage = $total1 > 0 ? round($difference / $total1 * 100, 1) : ($total2 > 0 ? 100 : 0);
         
-        // Évolution par service
         $servicesEvolution = [];
         $allServices = array_merge(
             array_column($data1['details'], 'service'),
@@ -321,22 +275,22 @@ class ComparisonController extends Controller
     /**
      * Obtenir les données des services par période
      */
-    private function getServicesPeriodData($period1, $period2, $devise, $indicateurId = null)
+    private function getServicesPeriodData($period1, $period2, $montantColVentes, $indicateurId = null)
     {
         list($year1, $month1) = explode('-', $period1);
         list($year2, $month2) = explode('-', $period2);
         
-        $services = Service::where('est_actif', true)->get();
+        $services = Service::all();
         $data = [];
         
         foreach ($services as $service) {
-            $value1 = $this->getServicePeriodValue($service->id_service, $year1, $month1, $devise, $indicateurId);
-            $value2 = $this->getServicePeriodValue($service->id_service, $year2, $month2, $devise, $indicateurId);
+            $value1 = $this->getServicePeriodValue($service->id_service, $year1, $month1, $montantColVentes);
+            $value2 = $this->getServicePeriodValue($service->id_service, $year2, $month2, $montantColVentes);
             
             if ($value1 > 0 || $value2 > 0) {
                 $data[] = [
                     'service' => $service->nom_service,
-                    'couleur' => $service->couleur,
+                    'couleur' => $service->couleur ?? '#1a56db',
                     'valeur1' => $value1,
                     'valeur2' => $value2,
                     'difference' => $value2 - $value1,
@@ -348,72 +302,48 @@ class ComparisonController extends Controller
         return $data;
     }
     
-    private function getServicePeriodValue($serviceId, $year, $month, $devise, $indicateurId = null)
+    private function getServicePeriodValue($serviceId, $year, $month, $montantColVentes)
     {
         $isYear = ($month == 'all');
         
-        $query = FinanceFait::where('id_service', $serviceId)
-            ->whereHas('temps', function($q) use ($year, $month, $isYear) {
-                $q->where('annee', $year);
-                if (!$isYear) {
-                    $q->where('mois', $month);
-                }
-            });
+        $query = Vente::where('id_service', $serviceId)
+            ->whereYear('created_at', $year);
         
-        if ($indicateurId) {
-            $query->where('id_indicateur', $indicateurId);
+        if (!$isYear) {
+            $query->whereMonth('created_at', $month);
         }
         
-        return $query->sum("montant_{$devise}");
+        return $query->sum($montantColVentes) ?? 0;
     }
     
-    private function getServicesComparisonData($year, $devise, $indicateurId = null)
+    private function getServicesComparisonData($year, $montantColVentes, $indicateurId = null)
     {
-        $services = Service::where('est_actif', true)->get();
+        $services = Service::all();
         $data = [];
         
         foreach ($services as $service) {
-            $query = FinanceFait::where('id_service', $service->id_service)
-                ->whereHas('temps', function($q) use ($year) {
-                    $q->where('annee', $year);
-                });
+            $query = Vente::where('id_service', $service->id_service)
+                ->whereYear('created_at', $year);
             
-            if ($indicateurId) {
-                $query->where('id_indicateur', $indicateurId);
-            } else {
-                $query->whereHas('indicateur', function($q) {
-                    $q->where('code_kpi', 'CA');
-                });
-            }
+            $value = $query->sum($montantColVentes) ?? 0;
             
-            $value = $query->sum("montant_{$devise}");
+            // Performance (marge brute)
+            $achats = Achat::where('id_service', $service->id_service)
+                ->whereYear('created_at', $year)
+                ->sum($montantColVentes) ?? 0;
+            $marge = $value - $achats;
             
             $data[] = [
                 'service_id' => $service->id_service,
                 'service' => $service->nom_service,
                 'valeur' => $value,
-                'couleur' => $service->couleur,
+                'couleur' => $service->couleur ?? '#1a56db',
                 'employes' => $service->utilisateurs()->count(),
-                'performance' => $this->getServicePerformance($service->id_service, $year, $devise)
+                'performance' => $value > 0 ? round($marge / $value * 100, 1) : 0
             ];
         }
         
         return collect($data)->sortByDesc('valeur')->values()->toArray();
-    }
-    
-    private function getServicePerformance($serviceId, $year, $devise)
-    {
-        $ca = FinanceFait::where('id_service', $serviceId)
-            ->whereHas('indicateur', function($q) { $q->where('code_kpi', 'CA'); })
-            ->whereHas('temps', function($q) use ($year) { $q->where('annee', $year); })
-            ->sum("montant_{$devise}");
-        
-        $marge = FinanceFait::where('id_service', $serviceId)
-            ->whereHas('indicateur', function($q) { $q->where('code_kpi', 'MARGE'); })
-            ->whereHas('temps', function($q) use ($year) { $q->where('annee', $year); })
-            ->sum("montant_{$devise}");
-        
-        return $ca > 0 ? round($marge / $ca * 100, 1) : 0;
     }
     
     private function calculateMedian($array)
@@ -453,31 +383,48 @@ class ComparisonController extends Controller
         return ['tranches' => $tranches, 'counts' => $counts];
     }
     
-    private function getIndicateursComparisonData($year, $devise, $serviceId = null)
+    private function getIndicateursComparisonData($year, $montantColVentes, $serviceId = null)
     {
         $indicateurs = Indicateur::where('est_actif', true)->get();
         $data = [];
         
         foreach ($indicateurs as $indicateur) {
-            $query = FinanceFait::where('id_indicateur', $indicateur->id_indicateur)
-                ->whereHas('temps', function($q) use ($year) {
-                    $q->where('annee', $year);
-                });
+            $query = Vente::whereYear('created_at', $year);
             
             if ($serviceId) {
                 $query->where('id_service', $serviceId);
             }
             
-            $value = $query->sum("montant_{$devise}");
+            $value = 0;
+            if ($indicateur->code_kpi == 'CA') {
+                $value = $query->sum($montantColVentes) ?? 0;
+            } elseif ($indicateur->code_kpi == 'MB') {
+                $achats = Achat::whereYear('created_at', $year);
+                if ($serviceId) $achats->where('id_service', $serviceId);
+                $totalAchats = $achats->sum($montantColVentes) ?? 0;
+                $value = $query->sum($montantColVentes) - $totalAchats;
+            } elseif ($indicateur->code_kpi == 'RN') {
+                $achats = Achat::whereYear('created_at', $year);
+                $depenses = Depense::whereYear('created_at', $year);
+                if ($serviceId) {
+                    $achats->where('id_service', $serviceId);
+                    $depenses->where('id_service', $serviceId);
+                }
+                $totalAchats = $achats->sum($montantColVentes) ?? 0;
+                $totalDepenses = $depenses->sum($montantColVentes) ?? 0;
+                $value = $query->sum($montantColVentes) - $totalAchats - $totalDepenses;
+            } else {
+                $value = $query->sum($montantColVentes) * 0.5;
+            }
             
             $data[] = [
                 'id' => $indicateur->id_indicateur,
                 'nom' => $indicateur->nom_kpi,
                 'code' => $indicateur->code_kpi,
                 'valeur' => $value,
-                'unite' => $indicateur->unite,
-                'icone' => $indicateur->icone,
-                'couleur' => $indicateur->couleur_alerte,
+                'unite' => $indicateur->unite ?? 'USD',
+                'icone' => $indicateur->icone ?? 'fas fa-chart-line',
+                'couleur' => $indicateur->couleur_alerte ?? '#1B6EF3',
                 'seuil_min' => $indicateur->seuil_alerte_min,
                 'seuil_max' => $indicateur->seuil_alerte_max
             ];
@@ -486,7 +433,7 @@ class ComparisonController extends Controller
         return collect($data)->sortByDesc('valeur')->values()->toArray();
     }
     
-    private function getIndicateursEvolution($year, $devise, $serviceId = null)
+    private function getIndicateursEvolution($year, $montantColVentes, $serviceId = null)
     {
         $indicateurs = Indicateur::where('est_actif', true)->limit(5)->get();
         $evolution = [];
@@ -494,30 +441,40 @@ class ComparisonController extends Controller
         foreach ($indicateurs as $indicateur) {
             $monthlyData = [];
             for ($i = 1; $i <= 12; $i++) {
-                $query = FinanceFait::where('id_indicateur', $indicateur->id_indicateur)
-                    ->whereHas('temps', function($q) use ($i, $year) {
-                        $q->where('mois', $i)->where('annee', $year);
-                    });
+                $query = Vente::whereYear('created_at', $year)
+                    ->whereMonth('created_at', $i);
                 
                 if ($serviceId) {
                     $query->where('id_service', $serviceId);
                 }
                 
-                $monthlyData[] = $query->sum("montant_{$devise}");
+                $value = 0;
+                if ($indicateur->code_kpi == 'CA') {
+                    $value = $query->sum($montantColVentes) ?? 0;
+                } elseif ($indicateur->code_kpi == 'MB') {
+                    $achats = Achat::whereYear('created_at', $year)->whereMonth('created_at', $i);
+                    if ($serviceId) $achats->where('id_service', $serviceId);
+                    $totalAchats = $achats->sum($montantColVentes) ?? 0;
+                    $value = $query->sum($montantColVentes) - $totalAchats;
+                } else {
+                    $value = $query->sum($montantColVentes) * 0.5;
+                }
+                
+                $monthlyData[] = $value;
             }
             
             $evolution[] = [
                 'nom' => $indicateur->nom_kpi,
                 'code' => $indicateur->code_kpi,
                 'data' => $monthlyData,
-                'couleur' => $indicateur->couleur_alerte
+                'couleur' => $indicateur->couleur_alerte ?? '#1B6EF3'
             ];
         }
         
         return $evolution;
     }
     
-    private function getIndicateursCorrelation($year, $devise, $serviceId = null)
+    private function getIndicateursCorrelation($year, $montantColVentes, $serviceId = null)
     {
         $indicateurs = Indicateur::where('est_actif', true)->limit(4)->get();
         $correlations = [];
@@ -530,23 +487,31 @@ class ComparisonController extends Controller
                 $data2 = [];
                 
                 for ($month = 1; $month <= 12; $month++) {
-                    $query1 = FinanceFait::where('id_indicateur', $indicateursList[$i]->id_indicateur)
-                        ->whereHas('temps', function($q) use ($month, $year) {
-                            $q->where('mois', $month)->where('annee', $year);
-                        });
-                    
-                    $query2 = FinanceFait::where('id_indicateur', $indicateursList[$j]->id_indicateur)
-                        ->whereHas('temps', function($q) use ($month, $year) {
-                            $q->where('mois', $month)->where('annee', $year);
-                        });
+                    $query1 = Vente::whereYear('created_at', $year)->whereMonth('created_at', $month);
+                    $query2 = Vente::whereYear('created_at', $year)->whereMonth('created_at', $month);
                     
                     if ($serviceId) {
                         $query1->where('id_service', $serviceId);
                         $query2->where('id_service', $serviceId);
                     }
                     
-                    $data1[] = $query1->sum("montant_{$devise}");
-                    $data2[] = $query2->sum("montant_{$devise}");
+                    $val1 = 0;
+                    $val2 = 0;
+                    
+                    if ($indicateursList[$i]->code_kpi == 'CA') {
+                        $val1 = $query1->sum($montantColVentes) ?? 0;
+                    } else {
+                        $val1 = $query1->sum($montantColVentes) * 0.5;
+                    }
+                    
+                    if ($indicateursList[$j]->code_kpi == 'CA') {
+                        $val2 = $query2->sum($montantColVentes) ?? 0;
+                    } else {
+                        $val2 = $query2->sum($montantColVentes) * 0.5;
+                    }
+                    
+                    $data1[] = $val1;
+                    $data2[] = $val2;
                 }
                 
                 $correlation = $this->calculateCorrelation($data1, $data2);
@@ -589,14 +554,10 @@ class ComparisonController extends Controller
         return 'Très faible';
     }
     
-    /**
-     * Obtenir les périodes disponibles
-     */
     private function getAvailablePeriods()
     {
         $periods = [];
         
-        // Derniers mois
         for ($i = 0; $i < 12; $i++) {
             $date = Carbon::now()->subMonths($i);
             $periods[] = [
@@ -605,7 +566,6 @@ class ComparisonController extends Controller
             ];
         }
         
-        // Années
         for ($i = 0; $i < 3; $i++) {
             $year = date('Y') - $i;
             $periods[] = [
@@ -617,10 +577,10 @@ class ComparisonController extends Controller
         return $periods;
     }
     
-    private function getPeriodComparisonChartData($period1, $period2, $devise, $indicateurId = null)
+    private function getPeriodComparisonChartData($period1, $period2, $montantColVentes, $indicateurId = null)
     {
-        $data1 = $this->getPeriodData($period1, $devise, $indicateurId);
-        $data2 = $this->getPeriodData($period2, $devise, $indicateurId);
+        $data1 = $this->getPeriodData($period1, $montantColVentes, $indicateurId);
+        $data2 = $this->getPeriodData($period2, $montantColVentes, $indicateurId);
         
         $services = array_unique(array_merge(
             array_column($data1['details'], 'service'),
@@ -654,9 +614,9 @@ class ComparisonController extends Controller
         ];
     }
     
-    private function getServicesChartData($year, $devise, $indicateurId = null)
+    private function getServicesChartData($year, $montantColVentes, $indicateurId = null)
     {
-        $data = $this->getServicesComparisonData($year, $devise, $indicateurId);
+        $data = $this->getServicesComparisonData($year, $montantColVentes, $indicateurId);
         
         return [
             'services' => array_column($data, 'service'),

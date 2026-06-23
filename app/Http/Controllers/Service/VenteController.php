@@ -56,6 +56,19 @@ class VenteController extends Controller
         
         // Statistiques
         $devise = session('devise', 'USD');
+        
+        // Évolution des ventes (6 derniers mois)
+        $evolution = [];
+        for ($i = 5; $i >= 0; $i--) {
+            $month = date('m', strtotime("-$i months"));
+            $year = date('Y', strtotime("-$i months"));
+            $total = Vente::where('id_service', $service->id_service)
+                ->whereMonth('created_at', $month)
+                ->whereYear('created_at', $year)
+                ->sum('montant');
+            $evolution[] = $total;
+        }
+        
         $stats = [
             'total' => Vente::where('id_service', $service->id_service)->count(),
             'total_montant' => Vente::where('id_service', $service->id_service)->sum('montant'),
@@ -63,7 +76,9 @@ class VenteController extends Controller
                 ->whereMonth('created_at', date('m'))
                 ->whereYear('created_at', date('Y'))
                 ->count(),
-            'moyenne_vente' => Vente::where('id_service', $service->id_service)->avg('montant') ?? 0
+            'moyenne_vente' => Vente::where('id_service', $service->id_service)->avg('montant') ?? 0,
+            'evolution' => $evolution,
+            'croissance' => 0
         ];
         
         return view('service.ventes.index', compact('ventes', 'stats', 'service', 'devise'));
@@ -81,10 +96,7 @@ class VenteController extends Controller
         }
         
         $service = $user->service ?? Service::first();
-        
         $devises = Devise::all();
-        
-        // Générer une référence automatique
         $reference = 'VTE-' . date('Ymd') . '-' . rand(1000, 9999);
         
         return view('service.ventes.create', compact('service', 'devises', 'reference'));
@@ -313,9 +325,15 @@ class VenteController extends Controller
         
         $ventes = $query->orderBy('created_at', 'desc')->get();
         
+        if ($ventes->isEmpty()) {
+            return redirect()->route('service.ventes.index')
+                ->with('warning', 'Aucune vente à exporter');
+        }
+        
         $filename = 'ventes_' . $service->nom_service . '_' . date('Y-m-d') . '.csv';
         
         $handle = fopen('php://temp', 'w+');
+        fprintf($handle, chr(0xEF).chr(0xBB).chr(0xBF));
         fputcsv($handle, ['Référence', 'Date', 'Montant', 'Devise', 'Facture', 'Description'], ';');
         
         foreach ($ventes as $vente) {

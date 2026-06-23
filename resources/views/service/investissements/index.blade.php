@@ -2,141 +2,199 @@
 @extends('layouts.powerbi')
 
 @section('title', 'Gestion des investissements')
-@section('page-title', 'Investissements - ' . $service->nom_service)
+@section('page-title', 'Tableau de bord des investissements')
 @section('breadcrumb', 'Service / Investissements')
 
 @section('content')
-<div class="container-fluid px-0">
+<div class="container-fluid px-2 px-md-3 px-lg-4">
 
-    {{-- En-tête --}}
+    {{-- EN-TÊTE --}}
     <div class="d-flex justify-content-between align-items-center mb-4 flex-wrap gap-3">
         <div>
             <h2 class="mb-1 fw-bold">
                 <i class="fas fa-chart-line me-2" style="color: #7e3af2;"></i>
-                Investissements
+                Gestion des Investissements
             </h2>
             <p class="text-muted mb-0">
-                <i class="fas fa-calendar-alt me-1"></i> {{ now()->translatedFormat('l d F Y') }}
+                <i class="fas fa-calendar-alt me-1"></i> {{ now()->translatedFormat('l d F Y') }} | 
+                <i class="fas fa-clock ms-2 me-1"></i> {{ now()->format('H:i') }}
+                <span class="badge bg-success ms-2">
+                    <i class="fas fa-sync-alt me-1 fa-spin"></i> Données en temps réel
+                </span>
             </p>
         </div>
-        <div class="d-flex gap-2">
-            <button class="btn btn-outline-success" onclick="exportInvestissements()">
-                <i class="fas fa-download me-2"></i>Exporter
-            </button>
-            <a href="{{ route('service.investissements.create') }}" class="btn btn-primary">
-                <i class="fas fa-plus me-2"></i>Nouvel investissement
+            <a href="{{ route('service.investissements.create') }}" class="btn btn-primary btn-sm">
+                <i class="fas fa-plus me-1"></i>Nouvel investissement
             </a>
         </div>
     </div>
 
-    {{-- Statistiques --}}
-    <div class="row g-4 mb-4">
-        <div class="col-md-3">
-            <div class="stat-card text-center p-3 rounded-3" style="background: linear-gradient(135deg, #7e3af2, #6b2fd9); color: white;">
-                <div class="stat-number display-6 fw-bold">{{ number_format($stats['total']) }}</div>
-                <div class="stat-label">Total projets</div>
+    {{-- STATISTIQUES GLOBALES --}}
+    <div class="row g-2 g-md-3 g-lg-4 mb-4">
+        <div class="col-6 col-md-3">
+            <div class="stat-card text-center p-2 p-md-3 rounded-3" style="background: linear-gradient(135deg, #7e3af2, #6b2fd9); color: white;">
+                <div class="stat-icon"><i class="fas fa-project-diagram fa-2x"></i></div>
+                <div class="stat-number display-6 fw-bold">{{ $stats['total'] ?? 0 }}</div>
+                <div class="stat-label small">Total projets</div>
+                
             </div>
         </div>
-        <div class="col-md-3">
-            <div class="stat-card text-center p-3 rounded-3" style="background: linear-gradient(135deg, #1B6EF3, #1a56db); color: white;">
-                <div class="stat-number display-6 fw-bold">{{ number_format($stats['total_montant'], 0, ',', ' ') }}</div>
-                <div class="stat-label">Investissement total ({{ $devise }})</div>
+        <div class="col-6 col-md-3">
+            <div class="stat-card text-center p-2 p-md-3 rounded-3" style="background: linear-gradient(135deg, #1B6EF3, #1a56db); color: white;">
+                <div class="stat-icon"><i class="fas fa-money-bill-wave fa-2x"></i></div>
+                <div class="stat-number display-6 fw-bold">{{ number_format($stats['total_montant'] ?? 0, 0, ',', ' ') }}</div>
+                <div class="stat-label small">Investissement total ({{ $devise ?? 'USD' }})</div>
             </div>
         </div>
-        <div class="col-md-3">
-            <div class="stat-card text-center p-3 rounded-3" style="background: linear-gradient(135deg, #0e9f6e, #0a7c5a); color: white;">
-                <div class="stat-number display-6 fw-bold">{{ $stats['en_cours'] }}</div>
-                <div class="stat-label">Projets en cours</div>
+        <div class="col-6 col-md-3">
+            <div class="stat-card text-center p-2 p-md-3 rounded-3" style="background: linear-gradient(135deg, #0e9f6e, #0a7c5a); color: white;">
+                <div class="stat-icon"><i class="fas fa-spinner fa-2x"></i></div>
+                <div class="stat-number display-6 fw-bold">{{ $stats['en_cours'] ?? 0 }}</div>
+                <div class="stat-label small">Projets en cours</div>
             </div>
         </div>
-        <div class="col-md-3">
-            <div class="stat-card text-center p-3 rounded-3" style="background: linear-gradient(135deg, #f5a623, #e69500); color: white;">
-                <div class="stat-number display-6 fw-bold">{{ number_format($stats['roi_moyen'], 1) }}%</div>
-                <div class="stat-label">ROI moyen estimé</div>
+        <div class="col-6 col-md-3">
+            <div class="stat-card text-center p-2 p-md-3 rounded-3" style="background: linear-gradient(135deg, #f5a623, #e69500); color: white;">
+                <div class="stat-icon"><i class="fas fa-percentage fa-2x"></i></div>
+                <div class="stat-number display-6 fw-bold">{{ number_format($stats['roi_moyen'] ?? 0, 1) }}%</div>
+                <div class="stat-label small">ROI moyen estimé</div>
             </div>
         </div>
     </div>
 
-    {{-- Filtres --}}
+    {{-- GRAPHIQUES --}}
+    <div class="row g-2 g-md-3 g-lg-4 mb-4">
+        
+        <div class="col-12 col-md-6">
+            <div class="powerbi-card h-100">
+                <div class="card-header-custom p-3 p-md-4 border-bottom d-flex justify-content-between align-items-center">
+                    <div>
+                        <h5 class="mb-0 fs-6 fs-md-5">
+                            <i class="fas fa-chart-line me-2" style="color: #7e3af2;"></i>
+                            Évolution des Investissements
+                        </h5>
+                        <small class="text-muted">6 derniers mois</small>
+                    </div>
+                    <span class="badge bg-purple">{{ number_format($stats['total_montant'] ?? 0, 0, ',', ' ') }} {{ $devise ?? 'USD' }}</span>
+                </div>
+                <div class="card-body p-3 p-md-4">
+                    <div class="chart-container" style="position: relative; height: 250px;">
+                        <canvas id="evolutionChart"></canvas>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-12 col-md-6">
+            <div class="powerbi-card h-100">
+                <div class="card-header-custom p-3 p-md-4 border-bottom d-flex justify-content-between align-items-center">
+                    <div>
+                        <h5 class="mb-0 fs-6 fs-md-5">
+                            <i class="fas fa-chart-pie me-2" style="color: #f5a623;"></i>
+                            Répartition par Statut
+                        </h5>
+                        <small class="text-muted">État des projets</small>
+                    </div>
+                    <span class="badge bg-warning">{{ count($stats['statuts_data'] ?? []) }} statuts</span>
+                </div>
+                <div class="card-body p-3 p-md-4">
+                    <div class="chart-container" style="position: relative; height: 250px;">
+                        <canvas id="statusChart"></canvas>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    {{-- FILTRES --}}
     <div class="powerbi-card mb-4">
-        <div class="card-body">
-            <form method="GET" action="{{ route('service.investissements.index') }}" class="row g-3">
-                <div class="col-md-3">
+        <div class="card-body p-3 p-md-4">
+            <form method="GET" action="{{ route('service.investissements.index') }}" class="row g-2 g-md-3">
+                <div class="col-6 col-md-3">
                     <label class="form-label small text-muted">Date début</label>
-                    <input type="date" name="date_from" class="form-control" value="{{ request('date_from') }}">
+                    <input type="date" name="date_from" class="form-control form-control-sm" value="{{ request('date_from') }}">
                 </div>
-                <div class="col-md-3">
+                <div class="col-6 col-md-3">
                     <label class="form-label small text-muted">Date fin</label>
-                    <input type="date" name="date_to" class="form-control" value="{{ request('date_to') }}">
+                    <input type="date" name="date_to" class="form-control form-control-sm" value="{{ request('date_to') }}">
                 </div>
-                <div class="col-md-3">
+                <div class="col-6 col-md-3">
                     <label class="form-label small text-muted">Statut</label>
-                    <select name="statut" class="form-select">
+                    <select name="statut" class="form-select form-select-sm">
                         <option value="">Tous</option>
-                        @foreach($statuts as $statut)
+                        @foreach($statuts ?? [] as $statut)
                             <option value="{{ $statut }}" {{ request('statut') == $statut ? 'selected' : '' }}>{{ $statut }}</option>
                         @endforeach
                     </select>
                 </div>
-                <div class="col-md-3 d-flex align-items-end">
-                    <button type="submit" class="btn btn-primary w-100">
-                        <i class="fas fa-filter me-2"></i>Filtrer
+                <div class="col-6 col-md-3 d-flex align-items-end">
+                    <button type="submit" class="btn btn-primary btn-sm w-100">
+                        <i class="fas fa-filter me-1"></i>Filtrer
                     </button>
                 </div>
             </form>
         </div>
     </div>
 
-    {{-- Tableau des investissements --}}
+    {{-- TABLEAU --}}
     <div class="powerbi-card">
+        <div class="card-header-custom p-3 p-md-4 border-bottom d-flex justify-content-between align-items-center">
+            <h5 class="mb-0 fs-6 fs-md-5">
+                <i class="fas fa-table me-2" style="color: #7e3af2;"></i>
+                Liste des investissements
+            </h5>
+            <span class="badge bg-primary">{{ $investissements->count() ?? 0 }} enregistrements</span>
+        </div>
         <div class="card-body p-0">
             <div class="table-responsive">
-                <table class="table table-hover mb-0">
+                <table class="table table-hover mb-0 table-sm table-md">
                     <thead class="table-light">
                         <tr>
-                            <th>Référence</th>
-                            <th>Projet</th>
-                            <th>Date</th>
-                            <th>Montant</th>
-                            <th>Durée</th>
-                            <th>ROI estimé</th>
-                            <th>Statut</th>
-                            <th>Actions</th>
+                            <th class="py-2">Réf.</th>
+                            <th class="py-2">Projet</th>
+                            <th class="py-2">Date</th>
+                            <th class="py-2">Montant</th>
+                            <th class="py-2 d-none d-md-table-cell">Durée</th>
+                            <th class="py-2">ROI</th>
+                            <th class="py-2">Statut</th>
+                            <th class="py-2">Actions</th>
                         </tr>
                     </thead>
                     <tbody>
-                        @forelse($investissements as $invest)
+                        @forelse($investissements ?? [] as $invest)
                         <tr>
-                            <td><code>{{ $invest->reference }}</code></td>
-                            <td>
+                            <td class="py-2"><code class="fw-bold">{{ $invest->reference ?? '#' . str_pad($invest->id_investissement, 5, '0', STR_PAD_LEFT) }}</code></td>
+                            <td class="py-2">
                                 <div class="d-flex align-items-center gap-2">
                                     <i class="fas fa-chart-line" style="color: #7e3af2;"></i>
-                                    <strong>{{ $invest->nom_projet }}</strong>
+                                    <strong class="small">{{ $invest->nom_projet }}</strong>
                                 </div>
                             </td>
-                            <td>{{ $invest->created_at->translatedFormat('d/m/Y') }}</td>
-                            <td class="fw-bold text-primary">{{ number_format($invest->montant, 0, ',', ' ') }} {{ $invest->devise->code ?? 'USD' }}</td>
-                            <td>{{ $invest->duree_mois }} mois</td>
-                            <td>
+                            <td class="py-2">{{ $invest->created_at->translatedFormat('d/m/Y') }}</td>
+                            <td class="py-2 fw-bold text-primary">{{ number_format($invest->montant ?? 0, 0, ',', ' ') }} {{ $invest->devise->code ?? 'USD' }}</td>
+                            <td class="py-2 d-none d-md-table-cell">{{ $invest->duree_mois ?? '-' }} mois</td>
+                            <td class="py-2">
                                 @php
                                     $roiClass = 'text-success';
-                                    if($invest->roi_estime < 0) $roiClass = 'text-danger';
-                                    elseif($invest->roi_estime < 10) $roiClass = 'text-warning';
+                                    if(($invest->roi_estime ?? 0) < 0) $roiClass = 'text-danger';
+                                    elseif(($invest->roi_estime ?? 0) < 10) $roiClass = 'text-warning';
                                 @endphp
-                                <span class="fw-bold {{ $roiClass }}">{{ $invest->roi_estime ?? '-' }}%</span>
+                                <span class="fw-bold {{ $roiClass }}">{{ number_format($invest->roi_estime ?? 0, 1) }}%</span>
                             </td>
-                            <td>
+                            <td class="py-2">
                                 @php
-                                    $statutClass = [
+                                    $statutColors = [
                                         'En cours' => 'primary',
                                         'Terminé' => 'success',
                                         'Annulé' => 'danger',
                                         'En attente' => 'warning'
-                                    ][$invest->statut] ?? 'secondary';
+                                    ];
                                 @endphp
-                                <span class="badge bg-{{ $statutClass }}">{{ $invest->statut }}</span>
+                                <span class="badge bg-{{ $statutColors[$invest->statut ?? 'En attente'] ?? 'secondary' }}">
+                                    {{ $invest->statut ?? 'En attente' }}
+                                </span>
                             </td>
-                            <td>
+                            <td class="py-2">
                                 <div class="btn-group btn-group-sm">
                                     <a href="{{ route('service.investissements.show', $invest->id_investissement) }}" class="btn btn-outline-info" title="Voir">
                                         <i class="fas fa-eye"></i>
@@ -152,11 +210,11 @@
                         </tr>
                         @empty
                         <tr>
-                            <td colspan="8" class="text-center py-5">
-                                <i class="fas fa-chart-line fa-3x text-muted mb-3 d-block"></i>
-                                <p class="text-muted mb-0">Aucun investissement enregistré</p>
-                                <a href="{{ route('service.investissements.create') }}" class="btn btn-sm btn-primary mt-3">
-                                    <i class="fas fa-plus me-2"></i>Ajouter un investissement
+                            <td colspan="8" class="text-center py-4">
+                                <i class="fas fa-chart-line fa-2x text-muted d-block mb-2"></i>
+                                <p class="text-muted mb-0 small">Aucun investissement enregistré</p>
+                                <a href="{{ route('service.investissements.create') }}" class="btn btn-sm btn-primary mt-2">
+                                    <i class="fas fa-plus me-1"></i>Ajouter un investissement
                                 </a>
                             </td>
                         </tr>
@@ -165,78 +223,277 @@
                 </table>
             </div>
         </div>
-        <div class="card-footer bg-transparent">
-            {{ $investissements->withQueryString()->links() }}
+        <div class="card-footer bg-transparent p-3">
+            <div class="d-flex justify-content-between align-items-center flex-wrap gap-2">
+                <small class="text-muted">
+                    <i class="fas fa-info-circle me-1"></i>
+                    Dernière mise à jour: {{ now()->translatedFormat('d/m/Y à H:i') }}
+                </small>
+                {{ $investissements->withQueryString()->links() }}
+            </div>
         </div>
     </div>
 </div>
 
 @push('scripts')
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+
 <script>
-    function deleteInvestissement(id) {
-        Swal.fire({
-            title: 'Supprimer l\'investissement ?',
-            text: "Cette action est irréversible.",
-            icon: 'warning',
-            showCancelButton: true,
-            confirmButtonColor: '#e02424',
-            confirmButtonText: 'Oui, supprimer',
-            cancelButtonText: 'Annuler'
-        }).then((result) => {
-            if (result.isConfirmed) {
-                window.location.href = "{{ url('service/investissements') }}/" + id + "/delete";
-            }
-        });
-    }
+document.addEventListener('DOMContentLoaded', function() {
+    // DONNÉES
+    const months = ['Jan', 'Fév', 'Mar', 'Avr', 'Mai', 'Juin'];
+    const investData = @json($stats['evolution'] ?? array_fill(0, 6, 0));
     
-    function exportInvestissements() {
-        Swal.fire({
-            title: 'Exporter les investissements',
-            html: `
-                <div class="mb-3">
-                    <label>Date début</label>
-                    <input type="date" id="export_date_from" class="form-control">
-                </div>
-                <div class="mb-3">
-                    <label>Date fin</label>
-                    <input type="date" id="export_date_to" class="form-control">
-                </div>
-                <div>
-                    <label>Statut</label>
-                    <select id="export_statut" class="form-control">
-                        <option value="">Tous</option>
-                        @foreach($statuts as $statut)
-                            <option value="{{ $statut }}">{{ $statut }}</option>
-                        @endforeach
-                    </select>
-                </div>
-            `,
-            showCancelButton: true,
-            confirmButtonText: 'Exporter',
-            preConfirm: () => {
-                const date_from = document.getElementById('export_date_from').value;
-                const date_to = document.getElementById('export_date_to').value;
-                const statut = document.getElementById('export_statut').value;
-                let url = "{{ route('service.investissements.export') }}";
-                let params = [];
-                if (date_from) params.push('date_from=' + date_from);
-                if (date_to) params.push('date_to=' + date_to);
-                if (statut) params.push('statut=' + statut);
-                if (params.length) url += '?' + params.join('&');
-                window.location.href = url;
+    const statusData = @json($stats['statuts_data'] ?? []);
+    const statusLabels = Object.keys(statusData);
+    const statusValues = Object.values(statusData);
+    
+    const statusColorMap = {
+        'En cours': '#1B6EF3',
+        'Terminé': '#0e9f6e',
+        'Annulé': '#e02424',
+        'En attente': '#f5a623'
+    };
+    const statusColors = statusLabels.map(label => statusColorMap[label] || '#7e3af2');
+
+    // 1. Évolution (BARRES)
+    if (document.getElementById('evolutionChart')) {
+        const ctxEvo = document.getElementById('evolutionChart').getContext('2d');
+        new Chart(ctxEvo, {
+            type: 'bar',
+            data: {
+                labels: months,
+                datasets: [{
+                    label: 'Investissements (USD)',
+                    data: investData,
+                    backgroundColor: ['rgba(123, 58, 242, 0.7)', 'rgba(123, 58, 242, 0.5)', 'rgba(123, 58, 242, 0.3)'],
+                    borderColor: '#7e3af2',
+                    borderWidth: 2,
+                    borderRadius: 8,
+                    barThickness: 40
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: { display: false },
+                    tooltip: {
+                        backgroundColor: 'rgba(0,0,0,0.85)',
+                        cornerRadius: 10,
+                        callbacks: {
+                            label: function(context) {
+                                return 'Investissements: ' + new Intl.NumberFormat('fr-FR').format(context.raw) + ' USD';
+                            }
+                        }
+                    }
+                },
+                scales: {
+                    y: {
+                        beginAtZero: true,
+                        grid: { color: 'rgba(0,0,0,0.06)' },
+                        ticks: {
+                            callback: function(value) {
+                                if (value >= 1000) return (value / 1000) + 'k';
+                                return value;
+                            }
+                        }
+                    },
+                    x: {
+                        grid: { display: false }
+                    }
+                },
+                animation: { duration: 800 }
             }
         });
     }
+
+    // 2. Répartition par Statut (DONUT MULTICOLOR)
+    if (document.getElementById('statusChart')) {
+        const ctxStatus = document.getElementById('statusChart').getContext('2d');
+        new Chart(ctxStatus, {
+            type: 'doughnut',
+            data: {
+                labels: statusLabels.length > 0 ? statusLabels : ['Aucune donnée'],
+                datasets: [{
+                    data: statusValues.length > 0 ? statusValues : [1],
+                    backgroundColor: statusColors.length > 0 ? statusColors : ['#7e3af2'],
+                    borderColor: '#fff',
+                    borderWidth: 3,
+                    hoverOffset: 15
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                cutout: '55%',
+                plugins: {
+                    legend: {
+                        position: 'bottom',
+                        labels: {
+                            font: { size: 10, weight: '500' },
+                            boxWidth: 14,
+                            padding: 12,
+                            usePointStyle: true,
+                            pointStyle: 'circle'
+                        }
+                    },
+                    tooltip: {
+                        backgroundColor: 'rgba(0,0,0,0.85)',
+                        cornerRadius: 10,
+                        callbacks: {
+                            label: function(context) {
+                                const total = context.dataset.data.reduce((a, b) => a + b, 0);
+                                const percentage = total > 0 ? ((context.raw / total) * 100).toFixed(1) : 0;
+                                return context.label + ': ' + new Intl.NumberFormat('fr-FR').format(context.raw) + ' USD (' + percentage + '%)';
+                            }
+                        }
+                    }
+                },
+                animation: { animateRotate: true, duration: 1200 }
+            }
+        });
+    }
+});
+
+function deleteInvestissement(id) {
+    Swal.fire({
+        title: 'Supprimer l\'investissement ?',
+        text: "Cette action est irréversible.",
+        icon: 'warning',
+        showCancelButton: true,
+        confirmButtonColor: '#e02424',
+        confirmButtonText: 'Oui, supprimer',
+        cancelButtonText: 'Annuler'
+    }).then((result) => {
+        if (result.isConfirmed) {
+            window.location.href = "{{ url('service/investissements') }}/" + id + "/delete";
+        }
+    });
+}
+
+function exportInvestissements() {
+    Swal.fire({
+        title: 'Exporter les investissements',
+        html: `
+            <div class="mb-3 text-start">
+                <label class="form-label small fw-semibold">Date début</label>
+                <input type="date" id="export_date_from" class="form-control">
+            </div>
+            <div class="mb-3 text-start">
+                <label class="form-label small fw-semibold">Date fin</label>
+                <input type="date" id="export_date_to" class="form-control">
+            </div>
+            <div class="text-start">
+                <label class="form-label small fw-semibold">Statut</label>
+                <select id="export_statut" class="form-control">
+                    <option value="">Tous</option>
+                    @foreach($statuts ?? [] as $statut)
+                        <option value="{{ $statut }}">{{ $statut }}</option>
+                    @endforeach
+                </select>
+            </div>
+        `,
+        showCancelButton: true,
+        confirmButtonText: 'Exporter',
+        preConfirm: () => {
+            const date_from = document.getElementById('export_date_from').value;
+            const date_to = document.getElementById('export_date_to').value;
+            const statut = document.getElementById('export_statut').value;
+            let url = "{{ route('service.investissements.export') }}";
+            let params = [];
+            if (date_from) params.push('date_from=' + date_from);
+            if (date_to) params.push('date_to=' + date_to);
+            if (statut) params.push('statut=' + statut);
+            if (params.length) url += '?' + params.join('&');
+            window.location.href = url;
+        }
+    });
+}
 </script>
 @endpush
 
+@push('styles')
 <style>
-    .stat-card {
-        transition: transform 0.2s;
+    .powerbi-card {
+        border: none;
+        border-radius: 16px;
+        box-shadow: 0 2px 16px rgba(0,0,0,0.06);
+        background: #fff;
+        transition: transform 0.3s, box-shadow 0.3s;
+        overflow: hidden;
     }
-    .stat-card:hover {
+    .powerbi-card:hover {
+        box-shadow: 0 8px 32px rgba(0,0,0,0.10);
         transform: translateY(-3px);
     }
+    .card-header-custom {
+        background: linear-gradient(135deg, #f8fafc, #f1f4f9);
+        border-bottom: 1px solid rgba(0,0,0,0.05);
+    }
+    .stat-card {
+        transition: transform 0.3s, box-shadow 0.3s;
+        cursor: default;
+        border-radius: 14px;
+        position: relative;
+        overflow: hidden;
+    }
+    .stat-card:hover {
+        transform: translateY(-5px);
+        box-shadow: 0 10px 30px rgba(0,0,0,0.15);
+    }
+    .stat-card .stat-icon {
+        position: absolute;
+        top: 10px;
+        right: 15px;
+        opacity: 0.2;
+    }
+    .stat-number {
+        font-size: 2.2rem;
+        font-weight: 700;
+        letter-spacing: -0.5px;
+    }
+    .stat-label {
+        font-size: 0.75rem;
+        opacity: 0.9;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+    }
+    .table-responsive {
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+    }
+    .table th, .table td {
+        white-space: nowrap;
+        vertical-align: middle;
+    }
+    .badge {
+        font-size: 0.7rem;
+        padding: 4px 12px;
+        border-radius: 20px;
+        font-weight: 500;
+    }
+    .chart-container {
+        min-height: 150px;
+    }
+    
+    @media (min-width: 768px) {
+        .stat-number {
+            font-size: 2.8rem !important;
+        }
+        .chart-container {
+            min-height: 200px;
+        }
+    }
+    @media (min-width: 992px) {
+        .stat-number {
+            font-size: 3.2rem !important;
+        }
+        .chart-container {
+            min-height: 250px;
+        }
+    }
 </style>
+@endpush
 @endsection

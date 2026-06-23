@@ -1,5 +1,6 @@
 <?php
 // app/Models/Decision.php
+
 namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
@@ -10,20 +11,46 @@ class Decision extends Model
     protected $primaryKey = 'id_decision';
     
     protected $fillable = [
-        'titre', 'description', 'parametres', 'resultat_simule', 
-        'impact_tresorerie', 'decision_prise', 'cree_par', 'statut', 'date_validation'
+        'titre',
+        'description',
+        'statut',
+        'parametres',
+        'impact_tresorerie',
+        'resultat_simule',
+        'priorite',
+        'cree_par',
+        'validee_par',
+        'date_validation',
+        'motif_rejet',
+        'decision_prise',
+        'is_auto',
+        'decision_id',
     ];
     
     protected $casts = [
         'parametres' => 'array',
-        'resultat_simule' => 'decimal:2',
         'impact_tresorerie' => 'decimal:2',
-        'date_validation' => 'datetime'
+        'resultat_simule' => 'decimal:2',
+        'date_validation' => 'datetime',
+        'is_auto' => 'boolean',
+    ];
+    
+    protected $attributes = [
+        'statut' => 'En attente',
+        'priorite' => 'Moyenne',
+        'parametres' => null,
+        'is_auto' => false,
+        'decision_prise' => null,
     ];
     
     public function createur()
     {
         return $this->belongsTo(Utilisateur::class, 'cree_par', 'id_utilisateur');
+    }
+    
+    public function valideur()
+    {
+        return $this->belongsTo(Utilisateur::class, 'validee_par', 'id_utilisateur');
     }
     
     public function simulations()
@@ -39,5 +66,10 @@ class Decision extends Model
     public function estRejetee()
     {
         return $this->statut === 'Rejetée';
+    }
+    
+    public function estEnAttente()
+    {
+        return $this->statut === 'En attente';
     }
 }
